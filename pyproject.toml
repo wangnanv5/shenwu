@@ -9,7 +9,10 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "click>=8.5.0",
+    "opencv-python>=5.0.0.93",
+    "pillow>=12.3.0",
     "pyautogui>=0.9.54",
+    "pyscreeze>=1.0.1",
     "pywin32>=312",
     "schedule>=1.2.2",
 ]

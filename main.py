@@ -12,5 +12,5 @@ if __name__ == '__main__':
     #         print(e)
 
     while True:
-        game_controller.run_xun_you()
-        time.sleep(game_controller.human_delay(2, sigma=0.15))
+        game_controller.run_fish()
+        time.sleep(game_controller.human_delay(3, sigma=0.15))

@@ -17,6 +17,11 @@ pyautogui.PAUSE = 0.2
 window_width = 800
 window_height = 600
 
+fish_width_start = 350
+fish_width_end = 430
+fish_height_start = 100
+fish_height_end = 180
+
 class GameController:
     def __init__(self):
         self.hwnd = None
@@ -135,6 +140,42 @@ class GameController:
                     print(f"未找到巡游任务的开始战斗对话框 {e}")
                     find_dialogue_flag = False
                     time.sleep(self.human_delay(1))
+
+    def run_fish(self):
+        win32gui.EnumWindows(self.get_hwnd, None)
+        assert len(self.hwnd_list) , "钓鱼只支持1个窗口"
+
+        hwnd = self.hwnd_list[0]
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        win32gui.SetForegroundWindow(hwnd)
+
+        # 抛竿
+        pyautogui.press('f1')
+        pyautogui.PAUSE = self.human_delay(4)
+        pyautogui.press('f1')
+
+        has_fish = True
+        left, top, right, bottom = self.get_client_rect(hwnd)
+        time.sleep(self.human_delay(1))
+
+        while has_fish:
+            game_image = ImageGrab.grab(bbox=(left+fish_width_start,top+ fish_height_start, left+fish_width_end, top+fish_height_end))
+            game_image.save("game_screenshot.png")
+
+            try:
+                start_fight_location = pyautogui.locate(str(you_yu_path),game_image, grayscale=True,confidence=0.7)
+                abs_x = left + start_fight_location.left + start_fight_location.width // 2
+                abs_y = top + start_fight_location.top + start_fight_location.height // 2
+
+                pyautogui.moveTo(abs_x,abs_y, duration=self.human_delay(0.2))
+                pyautogui.click()
+                time.sleep(self.human_delay(1))
+                has_fish = False
+
+            except Exception as e:
+                print(f"还未钓到鱼 {e}")
+                has_fish = False
+                time.sleep(self.human_delay(1))
 
 # pyautogui.rightClick()
 # pyautogui.doubleClick()

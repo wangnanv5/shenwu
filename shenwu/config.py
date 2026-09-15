@@ -10,3 +10,6 @@ hui_he_path = image_dir / "Common" / "hui_he.png"
 xun_you_start_fight_path = image_dir / "XunYou" / "start_fight.png"
 # 巡游 任务栏，寻找npc
 xun_you_npc_path = image_dir / "XunYou" / "xun_you_npc.png"
+
+# 钓鱼相关
+you_yu_path = image_dir / "Fish" / "you_yu.png"

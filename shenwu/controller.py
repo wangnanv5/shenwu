@@ -26,7 +26,7 @@ class GameController:
 
     def get_hwnd(self,hwnd, extra):
         title = win32gui.GetWindowText(hwnd)
-        if "幻唐志" in title:
+        if ("幻唐志" in title) and ("RENDER" not in title):
             self.hwnd_list.append(hwnd)
 
     def get_window_rect(self,hwnd):
@@ -91,7 +91,7 @@ class GameController:
 
                 try:
                     in_fight_location = pyautogui.locate(str(hui_he_path),game_image, grayscale=True,confidence=0.5)
-                    time.sleep(self.human_delay(1))
+                    time.sleep(self.human_delay(10))
 
                 except Exception as e:
                     print("✅ 回合标志消失，退出战斗循环")
@@ -105,7 +105,7 @@ class GameController:
 
             try:
                 task_location = pyautogui.locate(str(xun_you_npc_path),game_image, grayscale=True,confidence=0.5)
-                abs_x = left + task_location.left + task_location.width // 2
+                abs_x = left + task_location.left + task_location.width // 2 + 20
                 abs_y = top + task_location.top + task_location.height // 2
 
                 pyautogui.moveTo(abs_x,abs_y, duration=self.human_delay(0.2))

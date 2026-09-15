@@ -72,7 +72,7 @@ class GameController:
 
         for hwnd in self.hwnd_list:
             # 检测战斗
-            is_in_fight_flag = True
+            # is_in_fight_flag = True
             find_dialogue_flag = True
 
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
@@ -83,43 +83,42 @@ class GameController:
             left, top, right, bottom = self.get_client_rect(hwnd)
             time.sleep(self.human_delay(1))
 
-            loop_count = 0
-            while is_in_fight_flag:
-                loop_count += 1
-                print(f"🔄 巡游是否在战斗中检测中... 第{loop_count}次")
-                game_image = ImageGrab.grab(bbox=(left + window_width // 2, top, left + window_width, top + window_height // 2))
+            ### 下面的代码不用，因为只要不是第一次打巡游，都可以只识别对话框就行
+            # loop_count = 0
+            # while is_in_fight_flag:
+            #     loop_count += 1
+            #     print(f"🔄 巡游是否在战斗中检测中... 第{loop_count}次")
+            #     game_image = ImageGrab.grab(bbox=(left + window_width // 2, top, left + window_width, top + window_height // 2))
 
-                try:
-                    in_fight_location = pyautogui.locate(str(hui_he_path),game_image, grayscale=True,confidence=0.5)
-                    time.sleep(self.human_delay(10))
+            #     try:
+            #         in_fight_location = pyautogui.locate(str(hui_he_path),game_image, grayscale=True,confidence=0.5)
+            #         time.sleep(self.human_delay(10))
 
-                except Exception as e:
-                    print("✅ 回合标志消失，退出战斗循环")
-                    pyautogui.press('esc')
-                    self.auto_reset_round()
+            #     except Exception as e:
+            #         print("✅ 回合标志消失，退出战斗循环")
+            #         pyautogui.press('esc')
+            #         self.auto_reset_round()
 
-                    is_in_fight_flag = False
+            #         is_in_fight_flag = False
 
             # 检测战斗结束,开始寻找任务栏
-            game_image = ImageGrab.grab(bbox=(left, top, left + window_width, top + window_height))
+            # game_image = ImageGrab.grab(bbox=(left, top, left + window_width, top + window_height))
 
-            try:
-                task_location = pyautogui.locate(str(xun_you_npc_path),game_image, grayscale=True,confidence=0.5)
-                abs_x = left + task_location.left + task_location.width // 2 + 20
-                abs_y = top + task_location.top + task_location.height // 2
+            # try:
+            #     task_location = pyautogui.locate(str(xun_you_npc_path),game_image, grayscale=True,confidence=0.5)
+            #     abs_x = left + task_location.left + task_location.width // 2 + 20
+            #     abs_y = top + task_location.top + task_location.height // 2
 
-                pyautogui.moveTo(abs_x,abs_y, duration=self.human_delay(0.2))
-                pyautogui.click()
+            #     pyautogui.moveTo(abs_x,abs_y, duration=self.human_delay(0.2))
+            #     pyautogui.click()
 
-                time.sleep(self.human_delay(1))
-            except Exception as e:
-                print(f"未找到任务的巡游任务 {e}")
+            #     time.sleep(self.human_delay(1))
+            # except Exception as e:
+            #     print(f"未找到任务的巡游任务 {e}")
 
             # 点击对话框，进入战斗
-            loop_count = 0
+
             while find_dialogue_flag:
-                loop_count += 1
-                print(f"🔄 巡游对话框检测中... 第{loop_count}次")
                 game_image = ImageGrab.grab(bbox=(left, top, left + window_width, top + window_height))
 
                 try:
@@ -129,7 +128,7 @@ class GameController:
 
                     pyautogui.moveTo(abs_x,abs_y, duration=self.human_delay(0.2))
                     pyautogui.click()
-                    time.sleep(self.human_delay(1))
+                    time.sleep(self.human_delay(5))
                     find_dialogue_flag = False
 
                 except Exception as e:

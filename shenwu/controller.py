@@ -141,6 +141,20 @@ class GameController:
                     find_dialogue_flag = False
                     time.sleep(self.human_delay(1))
 
+    def run_auto_reset_round(self):
+        win32gui.EnumWindows(self.get_hwnd, None)
+        assert self.hwnd_list , "幻唐志窗口未找到"
+
+        for hwnd in self.hwnd_list:
+            # 检测战斗
+            # is_in_fight_flag = True
+
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            win32gui.SetForegroundWindow(hwnd)
+
+            self.auto_reset_round()
+            time.sleep(self.human_delay(1))
+
     def run_fish(self):
         win32gui.EnumWindows(self.get_hwnd, None)
         assert len(self.hwnd_list) , "钓鱼只支持1个窗口"

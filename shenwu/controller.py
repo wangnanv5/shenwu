@@ -151,16 +151,18 @@ class GameController:
 
         # 抛竿
         pyautogui.press('f1')
-        pyautogui.PAUSE = self.human_delay(4)
+        pyautogui.PAUSE = self.human_delay(2)
         pyautogui.press('f1')
 
         has_fish = True
         left, top, right, bottom = self.get_client_rect(hwnd)
         time.sleep(self.human_delay(1))
 
+        count = 0
         while has_fish:
-            game_image = ImageGrab.grab(bbox=(left+fish_width_start,top+ fish_height_start, left+fish_width_end, top+fish_height_end))
-            game_image.save("game_screenshot.png")
+            game_image = ImageGrab.grab(bbox=(left+fish_width_start,top + fish_height_start, left+fish_width_end, top+fish_height_end))
+            game_image.save(f"game_screenshot_{count}.png")
+            count += 1
 
             try:
                 start_fight_location = pyautogui.locate(str(you_yu_path),game_image, grayscale=True,confidence=0.7)

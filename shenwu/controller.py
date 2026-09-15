@@ -17,8 +17,8 @@ pyautogui.PAUSE = 0.2
 window_width = 800
 window_height = 600
 
-fish_width_start = 350
-fish_width_end = 430
+fish_width_start = 380
+fish_width_end = 440
 fish_height_start = 100
 fish_height_end = 180
 

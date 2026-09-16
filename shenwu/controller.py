@@ -127,7 +127,7 @@ class GameController:
                 game_image = ImageGrab.grab(bbox=(left, top, left + window_width, top + window_height))
 
                 try:
-                    start_fight_location = pyautogui.locate(str(xun_you_start_fight_path),game_image, grayscale=True,confidence=0.5)
+                    start_fight_location = pyautogui.locate(str(xun_you_start_fight_path),game_image, grayscale=True,confidence=0.6)
                     abs_x = left + start_fight_location.left + start_fight_location.width // 2
                     abs_y = top + start_fight_location.top + start_fight_location.height // 2
 

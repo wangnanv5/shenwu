@@ -10,3 +10,4 @@ if __name__ == '__main__':
             time.sleep(game_controller.human_delay(10, sigma=0.15))
         except Exception as e:
             print(e)
+  

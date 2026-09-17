@@ -1,13 +1,14 @@
 import pyautogui
 import win32gui
 import win32con
-import schedule
 import time
 import random
 import math
+import numpy as np
 from PIL import ImageGrab
 
 from shenwu.config import *
+from shenwu.ocr import Ocr
 
 import ctypes
 ctypes.windll.shcore.SetProcessDpiAwareness(2)
@@ -28,6 +29,7 @@ class GameController:
         self.window_width = 800
         self.window_height = 600
         self.hwnd_list = []
+        self.ocr = Ocr()
 
     def get_hwnd(self,hwnd, extra):
         title = win32gui.GetWindowText(hwnd)
@@ -71,13 +73,24 @@ class GameController:
 
         pyautogui.keyUp('ctrl')
 
+    def run_auto_reset_round(self):
+        win32gui.EnumWindows(self.get_hwnd, None)
+        assert self.hwnd_list , "幻唐志窗口未找到"
+
+        for hwnd in self.hwnd_list:
+
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            win32gui.SetForegroundWindow(hwnd)
+
+            self.auto_reset_round()
+            time.sleep(self.human_delay(1))
+
     def run_xun_you(self):
         win32gui.EnumWindows(self.get_hwnd, None)
         assert self.hwnd_list , "幻唐志窗口未找到"
 
         for hwnd in self.hwnd_list:
             # 检测战斗
-            # is_in_fight_flag = True
             find_dialogue_flag = True
 
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
@@ -86,7 +99,7 @@ class GameController:
             self.auto_reset_round()
 
             left, top, right, bottom = self.get_client_rect(hwnd)
-            time.sleep(self.human_delay(1))
+            time.sleep(self.human_delay(0.5))
 
             ### 下面的代码不用，因为只要不是第一次打巡游，都可以只识别对话框就行
             # loop_count = 0
@@ -122,38 +135,35 @@ class GameController:
             #     print(f"未找到任务的巡游任务 {e}")
 
             # 点击对话框，进入战斗
-
             while find_dialogue_flag:
                 game_image = ImageGrab.grab(bbox=(left, top, left + window_width, top + window_height))
-
                 try:
-                    start_fight_location = pyautogui.locate(str(xun_you_start_fight_path),game_image, grayscale=True,confidence=0.5)
-                    abs_x = left + start_fight_location.left + start_fight_location.width // 2
-                    abs_y = top + start_fight_location.top + start_fight_location.height // 2
+                    print("🔍 检测对话框中...")
+                    ocr_result = self.ocr.get_ocr_from_image(game_image, "开始战斗")
+                    best_bbox, best_text, best_conf = max(ocr_result, key=lambda x: x[2])
+
+                    if not ocr_result:
+                        print("⚠️ OCR结果为空")
+                        raise Exception("OCR结果为空")
+
+                    print(f"巡游最高置信度结果: '{best_text}' | 置信度: {best_conf:.4f}")
+
+                    bbox = np.array(best_bbox)
+                    center_x = np.mean(bbox[:, 0])
+                    center_y = np.mean(bbox[:, 1])
+
+                    abs_x = left + center_x
+                    abs_y = top + center_y
 
                     pyautogui.moveTo(abs_x,abs_y, duration=self.human_delay(0.2))
                     pyautogui.click()
-                    time.sleep(self.human_delay(5))
+                    time.sleep(self.human_delay(30))
                     find_dialogue_flag = False
 
                 except Exception as e:
-                    print(f"未找到巡游任务的开始战斗对话框 {e}")
+                    print(f"巡游任务报错 {e}")
                     find_dialogue_flag = False
-                    time.sleep(self.human_delay(1))
-
-    def run_auto_reset_round(self):
-        win32gui.EnumWindows(self.get_hwnd, None)
-        assert self.hwnd_list , "幻唐志窗口未找到"
-
-        for hwnd in self.hwnd_list:
-            # 检测战斗
-            # is_in_fight_flag = True
-
-            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-            win32gui.SetForegroundWindow(hwnd)
-
-            self.auto_reset_round()
-            time.sleep(self.human_delay(1))
+                    time.sleep(self.human_delay(30))
 
     def run_fish(self):
         win32gui.EnumWindows(self.get_hwnd, None)

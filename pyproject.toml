@@ -16,6 +16,7 @@ dependencies = [
     "pyautogui>=0.9.54",
     "pyscreeze>=1.0.1",
     "pywin32>=312",
+    "rapidocr-onnxruntime>=1.4.4",
     "schedule>=1.2.2",
 ]
 

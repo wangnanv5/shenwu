@@ -140,12 +140,11 @@ class GameController:
                 try:
                     print("🔍 检测对话框中...")
                     ocr_result = self.ocr.get_ocr_from_image(game_image, "开始战斗")
-                    best_bbox, best_text, best_conf = max(ocr_result, key=lambda x: x[2])
 
                     if not ocr_result:
-                        print("⚠️ OCR结果为空")
                         raise Exception("OCR结果为空")
 
+                    best_bbox, best_text, best_conf = max(ocr_result, key=lambda x: x[2])
                     print(f"巡游最高置信度结果: '{best_text}' | 置信度: {best_conf:.4f}")
 
                     bbox = np.array(best_bbox)
@@ -155,15 +154,19 @@ class GameController:
                     abs_x = left + center_x
                     abs_y = top + center_y
 
-                    pyautogui.moveTo(abs_x,abs_y, duration=self.human_delay(0.2))
-                    pyautogui.click()
-                    time.sleep(self.human_delay(30))
+                    # pyautogui.moveTo(abs_x,abs_y, duration=self.human_delay(0.2))
+                    pyautogui.click(abs_x,abs_y)
+                    time.sleep(self.human_delay(1))
+                    # win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+                    time.sleep(self.human_delay(5))
                     find_dialogue_flag = False
 
                 except Exception as e:
                     print(f"巡游任务报错 {e}")
                     find_dialogue_flag = False
-                    time.sleep(self.human_delay(30))
+                    time.sleep(self.human_delay(1))
+                    # win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+                    time.sleep(self.human_delay(5))
 
     def run_fish(self):
         win32gui.EnumWindows(self.get_hwnd, None)
@@ -199,6 +202,71 @@ class GameController:
                 print(f"还未钓到鱼 {e}")
                 has_fish = False
                 time.sleep(self.human_delay(1))
+
+    def run_auto_task(self,task_name):
+        win32gui.EnumWindows(self.get_hwnd, None)
+        assert self.hwnd_list , "幻唐志窗口未找到"
+
+        hwnd = self.hwnd_list[0]
+
+        left, top, right, bottom = self.get_client_rect(hwnd)
+        time.sleep(self.human_delay(0.5))
+
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        win32gui.SetForegroundWindow(hwnd)
+
+        # 先看看能不能找到该任务
+        time.sleep(self.human_delay(1))
+        game_image = ImageGrab.grab(bbox=(left, top, left + window_width, top + window_height))
+        ocr_result = self.ocr.get_ocr_from_image(game_image, "法宝引导")
+        print(ocr_result)
+
+        if not ocr_result:
+            raise Exception("OCR找不到此任务")
+
+        print(f"✅ 检测到任务 {task_name}")
+        best_bbox, best_text, best_conf = max(ocr_result, key=lambda x: x[2])
+        bbox = np.array(best_bbox)
+        center_x = np.mean(bbox[:, 0])
+        center_y = np.mean(bbox[:, 1])
+        abs_x = left + center_x
+        abs_y = top + center_y
+        pyautogui.click(abs_x,abs_y)
+        time.sleep(self.human_delay(1))
+    
+        # while find_dialogue_flag:
+        #     game_image = ImageGrab.grab(bbox=(left, top, left + window_width, top + window_height))
+        #     try:
+        #         print("🔍 检测对话框中...")
+        #         ocr_result = self.ocr.get_ocr_from_image(game_image, "开始战斗")
+
+        #         if not ocr_result:
+        #             raise Exception("OCR结果为空")
+
+        #         best_bbox, best_text, best_conf = max(ocr_result, key=lambda x: x[2])
+        #         print(f"巡游最高置信度结果: '{best_text}' | 置信度: {best_conf:.4f}")
+
+        #         bbox = np.array(best_bbox)
+        #         center_x = np.mean(bbox[:, 0])
+        #         center_y = np.mean(bbox[:, 1])
+
+        #         abs_x = left + center_x
+        #         abs_y = top + center_y
+
+        #         # pyautogui.moveTo(abs_x,abs_y, duration=self.human_delay(0.2))
+        #         pyautogui.click(abs_x,abs_y)
+        #         time.sleep(self.human_delay(1))
+        #         # win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+        #         time.sleep(self.human_delay(5))
+        #         find_dialogue_flag = False
+
+        #     except Exception as e:
+        #         print(f"巡游任务报错 {e}")
+        #         find_dialogue_flag = False
+        #         time.sleep(self.human_delay(1))
+        #         # win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+        #         time.sleep(self.human_delay(5))
+            
 
 # pyautogui.rightClick()
 # pyautogui.doubleClick()

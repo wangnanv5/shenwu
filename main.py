@@ -6,8 +6,10 @@ if __name__ == '__main__':
 
     while True:
         try:
-            game_controller.run_xun_you()
-            time.sleep(game_controller.human_delay(10, sigma=0.15))
+            # run_auto_reset_round  run_xun_you run_auto_task
+            game_controller.run_auto_task('法宝引导')
+            # game_controller.run_auto_task('法宝引导')
+            time.sleep(game_controller.human_delay(5, sigma=0.15))
         except Exception as e:
             print(e)
-  
+            break

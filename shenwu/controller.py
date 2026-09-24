@@ -101,39 +101,6 @@ class GameController:
             left, top, right, bottom = self.get_client_rect(hwnd)
             time.sleep(self.human_delay(0.5))
 
-            ### 下面的代码不用，因为只要不是第一次打巡游，都可以只识别对话框就行
-            # loop_count = 0
-            # while is_in_fight_flag:
-            #     loop_count += 1
-            #     print(f"🔄 巡游是否在战斗中检测中... 第{loop_count}次")
-            #     game_image = ImageGrab.grab(bbox=(left + window_width // 2, top, left + window_width, top + window_height // 2))
-
-            #     try:
-            #         in_fight_location = pyautogui.locate(str(hui_he_path),game_image, grayscale=True,confidence=0.5)
-            #         time.sleep(self.human_delay(10))
-
-            #     except Exception as e:
-            #         print("✅ 回合标志消失，退出战斗循环")
-            #         pyautogui.press('esc')
-            #         self.auto_reset_round()
-
-            #         is_in_fight_flag = False
-
-            # 检测战斗结束,开始寻找任务栏
-            # game_image = ImageGrab.grab(bbox=(left, top, left + window_width, top + window_height))
-
-            # try:
-            #     task_location = pyautogui.locate(str(xun_you_npc_path),game_image, grayscale=True,confidence=0.5)
-            #     abs_x = left + task_location.left + task_location.width // 2 + 20
-            #     abs_y = top + task_location.top + task_location.height // 2
-
-            #     pyautogui.moveTo(abs_x,abs_y, duration=self.human_delay(0.2))
-            #     pyautogui.click()
-
-            #     time.sleep(self.human_delay(1))
-            # except Exception as e:
-            #     print(f"未找到任务的巡游任务 {e}")
-
             # 点击对话框，进入战斗
             while find_dialogue_flag:
                 game_image = ImageGrab.grab(bbox=(left, top, left + window_width, top + window_height))
@@ -217,9 +184,8 @@ class GameController:
 
         # 先看看能不能找到该任务
         time.sleep(self.human_delay(1))
-        game_image = ImageGrab.grab(bbox=(left, top, left + window_width, top + window_height))
+        game_image = ImageGrab.grab(bbox=(left, top, right, bottom))
         ocr_result = self.ocr.get_ocr_from_image(game_image, "法宝引导")
-        print(ocr_result)
 
         if not ocr_result:
             raise Exception("OCR找不到此任务")
@@ -233,50 +199,168 @@ class GameController:
         abs_y = top + center_y
         pyautogui.click(abs_x,abs_y)
         time.sleep(self.human_delay(1))
-    
-        # while find_dialogue_flag:
-        #     game_image = ImageGrab.grab(bbox=(left, top, left + window_width, top + window_height))
-        #     try:
-        #         print("🔍 检测对话框中...")
-        #         ocr_result = self.ocr.get_ocr_from_image(game_image, "开始战斗")
 
-        #         if not ocr_result:
-        #             raise Exception("OCR结果为空")
+    def run_shi_men(self):
+        win32gui.EnumWindows(self.get_hwnd, None)
+        assert self.hwnd_list , "幻唐志窗口未找到"
+        hwnd = self.hwnd_list[0]
+        
+        shi_men_count = 9
+        while shi_men_count <= 10:
+            left, top, right, bottom = self.get_client_rect(hwnd)
+            time.sleep(self.human_delay(0.5))
 
-        #         best_bbox, best_text, best_conf = max(ocr_result, key=lambda x: x[2])
-        #         print(f"巡游最高置信度结果: '{best_text}' | 置信度: {best_conf:.4f}")
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            win32gui.SetForegroundWindow(hwnd)
 
-        #         bbox = np.array(best_bbox)
-        #         center_x = np.mean(bbox[:, 0])
-        #         center_y = np.mean(bbox[:, 1])
+            time.sleep(self.human_delay(1))
+            game_image = ImageGrab.grab(bbox=(left, top, right, bottom))
 
-        #         abs_x = left + center_x
-        #         abs_y = top + center_y
+            print("🔍 检测修业任务中...")
+            xiu_ye_ocr_result = self.ocr.get_ocr_from_image(game_image, "修业")
 
-        #         # pyautogui.moveTo(abs_x,abs_y, duration=self.human_delay(0.2))
-        #         pyautogui.click(abs_x,abs_y)
-        #         time.sleep(self.human_delay(1))
-        #         # win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
-        #         time.sleep(self.human_delay(5))
-        #         find_dialogue_flag = False
+            if not xiu_ye_ocr_result:
+                raise Exception("OCR找不到修业任务")
 
-        #     except Exception as e:
-        #         print(f"巡游任务报错 {e}")
-        #         find_dialogue_flag = False
-        #         time.sleep(self.human_delay(1))
-        #         # win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
-        #         time.sleep(self.human_delay(5))
-            
+            task_text = xiu_ye_ocr_result[0][1]
+            print(f"✅ 检测到任务 {task_text}")
 
-# pyautogui.rightClick()
-# pyautogui.doubleClick()
+            best_bbox, best_text, best_conf = max(xiu_ye_ocr_result, key=lambda x: x[2])
+            bbox = np.array(best_bbox)
+            center_x = np.mean(bbox[:, 0])
+            center_y = np.mean(bbox[:, 1])
+            abs_x = left + center_x
+            abs_y = top + center_y
+            pyautogui.click(abs_x,abs_y)
+            time.sleep(self.human_delay(1))
 
-# # 移动一段距离：向右 100，向下 50
-# pyautogui.moveRel(100, 50, duration=0.2)
+            if '物资' in task_text:
+                timeout = 20.0  # 最大等待时间（秒），防止永久卡死
+                time.sleep(self.human_delay(0.4))
 
-# # 按住左键拖动
-# pyautogui.moveTo(700, 400)
-# pyautogui.dragTo(900, 600, duration=0.5)
+                pyautogui.keyDown('ctrl')
+                time.sleep(self.human_delay(0.08))    
 
-# # 滚轮
-# pyautogui.scroll(3)
+                pyautogui.keyDown('j')
+                time.sleep(self.human_delay(0.05))
+
+                pyautogui.keyUp('j')
+                time.sleep(self.human_delay(0.06))    
+
+                pyautogui.keyUp('ctrl')
+
+                game_image = ImageGrab.grab(bbox=(left, top, right, bottom))
+                wu_zi_ocr_result = self.ocr.get_ocr_from_image(game_image, "购买")
+                time.sleep(self.human_delay(0.5))    
+
+                if not wu_zi_ocr_result:
+                    raise Exception("OCR找不到购买按钮")
+
+                best_bbox, best_text, best_conf = max(wu_zi_ocr_result, key=lambda x: x[2])
+                bbox = np.array(best_bbox)
+                center_x = np.mean(bbox[:, 0])
+                center_y = np.mean(bbox[:, 1])
+                abs_x = left + center_x
+                abs_y = top + center_y
+                pyautogui.click(abs_x,abs_y)
+                time.sleep(self.human_delay(1))
+
+                best_bbox, best_text, best_conf = max(xiu_ye_ocr_result, key=lambda x: x[2])
+                bbox = np.array(best_bbox)
+                center_x = np.mean(bbox[:, 0])
+                center_y = np.mean(bbox[:, 1])
+                abs_x = left + center_x
+                abs_y = top + center_y
+                pyautogui.click(abs_x,abs_y)
+                time.sleep(self.human_delay(10))
+
+                is_finish = False
+
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    count_image = ImageGrab.grab(bbox=(left, top, right, bottom))
+                    if self.ocr.get_ocr_from_image(count_image, f"第{shi_men_count+1}环"):
+                        is_finish = True
+                        print(f"第{shi_men_count}环[物资]任务是否完成, 进入下一个修业任务")
+                        break
+                    time.sleep(self.human_delay(2))
+                        
+                if not is_finish:
+                    raise Exception(f"等待【第{shi_men_count}环】超时")
+
+                print(f"修业任务第{shi_men_count}次完成")
+                shi_men_count += 1
+                pyautogui.keyDown('esc')
+
+            elif '挑战' in task_text:
+                self.auto_reset_round()
+
+                is_finish = False
+
+                timeout = 100.0
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    count_image = ImageGrab.grab(bbox=(left, top, right, bottom))
+                    if self.ocr.get_ocr_from_image(count_image, f"第{shi_men_count+1}环"):
+                        is_finish = True
+                        print(f"第{shi_men_count}环修业任务是否完成, 进入下一个修业任务")
+                        break
+
+                    print(f"第{shi_men_count}环[挑战]任务未完成,继续监控")
+                    time.sleep(self.human_delay(2))
+
+                if not is_finish:
+                    raise Exception(f"等待【第{shi_men_count}环】超时")
+
+                print(f"修业任务第{shi_men_count}次完成")
+                shi_men_count += 1
+                pyautogui.keyDown('esc')
+
+            elif '捕捉' in task_text:
+                # timeout = 20.0
+                # start_time = time.time()
+                # while time.time() - start_time < timeout:
+                #     count_image = ImageGrab.grab(bbox=(left, top, right, bottom))
+                #     if self.ocr.get_ocr_from_image(count_image, "信誉购买"):
+                #         is_finish = True
+                #         print(f"第{shi_men_count}环[捕捉宠物]任务是否完成, 进入下一个修业任务")
+                #         break
+
+                #     print(f"第{shi_men_count}环修业任务未完成,继续监控")
+                #     time.sleep(self.human_delay(2))
+
+                time.sleep(self.human_delay(4))
+
+                game_image = ImageGrab.grab(bbox=(left, top, right, bottom))
+                xin_yu_buy_result = self.ocr.get_ocr_from_image(game_image, "信誉购买")
+
+                if not xin_yu_buy_result:
+                    raise Exception("OCR找不到信誉购买按钮")
+
+                best_bbox, best_text, best_conf = max(xin_yu_buy_result, key=lambda x: x[2])
+                bbox = np.array(best_bbox)
+                center_x = np.mean(bbox[:, 0])
+                center_y = np.mean(bbox[:, 1])
+                abs_x = left + center_x
+                abs_y = top + center_y
+                pyautogui.click(abs_x,abs_y)
+                time.sleep(self.human_delay(1))          
+
+                timeout = 20.0
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    count_image = ImageGrab.grab(bbox=(left, top, right, bottom))
+                    if self.ocr.get_ocr_from_image(count_image, f"第{shi_men_count+1}环"):
+                        is_finish = True
+                        print(f"第{shi_men_count}环[捕捉宠物]任务完成, 进入下一个修业任务")
+                        break
+
+                    print(f"第{shi_men_count}环修业任务未完成,继续监控")
+                    time.sleep(self.human_delay(2))
+
+                if not is_finish:
+                    raise Exception(f"等待【第{shi_men_count}环】超时")
+
+                print(f"修业任务第{shi_men_count}次完成")
+                shi_men_count += 1
+                pyautogui.keyDown('esc')

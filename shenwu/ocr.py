@@ -3,7 +3,7 @@ from rapidocr_onnxruntime import RapidOCR
 class Ocr:
     def __init__(self):
         self.engine = RapidOCR()
-
+        # self.engine = RapidOCR(det_use_cuda=True, cls_use_cuda=True, rec_use_cuda=True)
     def get_ocr_from_image(self, img, target_texts,return_all=False):
         """
         :param img: 输入图像

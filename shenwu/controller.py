@@ -30,12 +30,13 @@ class GameController:
         self.window_height = 600
         self.hwnd_list = []
         self.ocr = Ocr()
-
+        self.calendar_data = None
+        self.has_calendar = False
+        self.has_pet_transaction = False
+        self.has_item_transaction = False
         win32gui.EnumWindows(self.get_hwnd, None)
         assert self.hwnd_list , "幻唐志窗口未找到"
         print(f"初始化成功,找到{len(self.hwnd_list)}个游戏窗口")
-
-
 
     def get_hwnd(self,hwnd, extra):
         title = win32gui.GetWindowText(hwnd)
@@ -202,15 +203,44 @@ class GameController:
         pyautogui.click(abs_x,abs_y)
         time.sleep(self.human_delay(1))
 
-    def open_calendar(self):
-        time.sleep(self.human_delay(0.4))
-        pyautogui.keyDown('alt')
-        time.sleep(self.human_delay(0.08))    
-        pyautogui.keyDown('y')
-        time.sleep(self.human_delay(0.05))
-        pyautogui.keyUp('y')
-        time.sleep(self.human_delay(0.06))    
-        pyautogui.keyUp('alt')
+    # 根据hwnd获和尺寸取窗口的image
+    def get_hwnd_image(self,hwnd):
+        left, top, right, bottom = self.get_client_rect(hwnd)
+        game_image = ImageGrab.grab(bbox=(left, top, right, bottom))
+        return game_image
+
+    def is_open_calendar(self,hwnd):
+        self.set_current_top(hwnd)
+        game_image = self.get_hwnd_image(hwnd)
+        print("🔍 判断页面是否包含日程...")
+        calendar_ocr_result,all_ocr = self.ocr.get_ocr_from_image(game_image, ["每日活动","组队历练","个人历练","周边休闲"],True)
+        if len(calendar_ocr_result) > 2:
+            print("✅ 检测到日程")
+            self.has_calendar = True
+            return all_ocr
+        else:
+            print("未找到日程")
+            self.has_calendar = False
+            return None
+
+    def open_calendar(self,hwnd):
+        calendar_ocr_result = self.is_open_calendar(hwnd)
+
+        if calendar_ocr_result is None:
+            time.sleep(self.human_delay(0.4))
+            pyautogui.keyDown('alt')
+            time.sleep(self.human_delay(0.08))    
+            pyautogui.keyDown('y')
+            time.sleep(self.human_delay(0.05))
+            pyautogui.keyUp('y')
+            time.sleep(self.human_delay(0.06))    
+            pyautogui.keyUp('alt')
+            self.calendar_data = self.is_open_calendar(hwnd)
+            self.has_calendar = True
+            return self.calendar_data
+        else:
+            self.calendar_data = calendar_ocr_result
+            return calendar_ocr_result
 
     def set_current_top(self,hwnd):
         win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
@@ -219,158 +249,224 @@ class GameController:
     def set_hide_window(self,hwnd):
         win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
 
-    def run_shi_men(self):
+    def get_shi_men_in_calendar(self,hwnd):
+        if self.calendar_data is None:
+            self.open_calendar(hwnd)
+
+        target = "/10"
+        found = [(box, text, score) for box, text, score in self.calendar_data if target in text]
+        assert found, "未在日程中定位到修业任务进度"
+
+        current_count = found[0][1]
+        return int(current_count.split("/")[0])
+
+    def is_open_pet(self,hwnd):
+        self.set_current_top(hwnd)
+        game_image = self.get_hwnd_image(hwnd)
+        print("🔍 判断页面是否包含购买宠物页面...")
+        pet_ocr_result,all_ocr = self.ocr.get_ocr_from_image(game_image, ["宠物交易","现金购买","信誉购买"],True)
+        if len(pet_ocr_result) > 2:
+            print("✅ 检测到宠物交易页面")
+            self.has_pet_transaction = True
+            return all_ocr
+        else:
+            print("未找到宠物交易页面")
+            self.has_pet_transaction = False
+            return None    
+    
+    def is_open_item_shop(self,hwnd):
+        self.set_current_top(hwnd)
+        game_image = self.get_hwnd_image(hwnd)
+        print("🔍 判断页面是否包含物品寄售页面...")
+        pet_ocr_result,all_ocr = self.ocr.get_ocr_from_image(game_image, ["刷新货物","购买","整理"],True)
+        if len(pet_ocr_result) > 2:
+            print("✅ 检测到物品寄售页面")
+            self.has_item_transaction = True
+            return all_ocr
+        else:
+            print("未找到物品寄售页面")
+            self.has_item_transaction = False
+            return None    
+        
+    def run_xiu_ye(self):
         hwnd = self.hwnd_list[0]
         self.set_current_top(hwnd)
 
-        # 打开日历,开始修业任务
-        self.open_calendar()
+        # 打开日历,开始修业任务 
+        time.sleep(self.human_delay(1))
+        current_count = self.get_shi_men_in_calendar(hwnd)
+        if current_count == 10:
+            print("✅ 检测到师门任务完成")
+            return
 
+        if self.has_calendar:
+            pyautogui.keyDown('esc')
+
+        # current_count =3
+
+        print("开始修业任务")
+        print(f"当前修业任务进度: {current_count}/10")
         
-        # shi_men_count = 9
-        # while shi_men_count <= 10:
-        #     left, top, right, bottom = self.get_client_rect(hwnd)
-        #     time.sleep(self.human_delay(0.5))
+        while current_count <= 10:
+            left, top, right, bottom = self.get_client_rect(hwnd)
 
-        #     win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        #     win32gui.SetForegroundWindow(hwnd)
+            time.sleep(self.human_delay(1))
+            game_image = ImageGrab.grab(bbox=(left, top, right, bottom))
 
-        #     time.sleep(self.human_delay(1))
-        #     game_image = ImageGrab.grab(bbox=(left, top, right, bottom))
+            print("🔍 检测修业任务中...")
+            xiu_ye_ocr_result = self.ocr.get_ocr_from_image(game_image, "修业")
 
-        #     print("🔍 检测修业任务中...")
-        #     xiu_ye_ocr_result = self.ocr.get_ocr_from_image(game_image, "修业")
+            if not xiu_ye_ocr_result:
+                raise Exception("OCR找不到修业任务")
 
-        #     if not xiu_ye_ocr_result:
-        #         raise Exception("OCR找不到修业任务")
+            task_text = xiu_ye_ocr_result[0][1]
+            print(f"✅ 检测到任务 {task_text}")
 
-        #     task_text = xiu_ye_ocr_result[0][1]
-        #     print(f"✅ 检测到任务 {task_text}")
+            best_bbox, best_text, best_conf = max(xiu_ye_ocr_result, key=lambda x: x[2])
+            bbox = np.array(best_bbox)
+            center_x = np.mean(bbox[:, 0])
+            center_y = np.mean(bbox[:, 1])
+            abs_x = left + center_x
+            abs_y = top + center_y
 
-        #     best_bbox, best_text, best_conf = max(xiu_ye_ocr_result, key=lambda x: x[2])
-        #     bbox = np.array(best_bbox)
-        #     center_x = np.mean(bbox[:, 0])
-        #     center_y = np.mean(bbox[:, 1])
-        #     abs_x = left + center_x
-        #     abs_y = top + center_y
-        #     pyautogui.click(abs_x,abs_y)
-        #     time.sleep(self.human_delay(1))
+            if '物资' in task_text:
+                timeout = 1.0  # 最大等待时间（秒），防止永久卡死
+                time.sleep(self.human_delay(0.4))
 
-        #     if '物资' in task_text:
-        #         timeout = 20.0  # 最大等待时间（秒），防止永久卡死
-        #         time.sleep(self.human_delay(0.4))
+                pyautogui.keyDown('alt')
+                time.sleep(self.human_delay(0.08))    
 
-        #         pyautogui.keyDown('ctrl')
-        #         time.sleep(self.human_delay(0.08))    
+                pyautogui.keyDown('j')
+                time.sleep(self.human_delay(0.05))
 
-        #         pyautogui.keyDown('j')
-        #         time.sleep(self.human_delay(0.05))
+                pyautogui.keyUp('j')
+                time.sleep(self.human_delay(0.06))    
 
-        #         pyautogui.keyUp('j')
-        #         time.sleep(self.human_delay(0.06))    
+                pyautogui.keyUp('alt')
 
-        #         pyautogui.keyUp('ctrl')
+                game_image = ImageGrab.grab(bbox=(left, top, right, bottom))
+                wu_zi_ocr_result = self.ocr.get_ocr_from_image(game_image, "购买")
+                time.sleep(self.human_delay(0.5))    
+                game_image.save("wu_zi_ocr_result.png")
 
-        #         game_image = ImageGrab.grab(bbox=(left, top, right, bottom))
-        #         wu_zi_ocr_result = self.ocr.get_ocr_from_image(game_image, "购买")
-        #         time.sleep(self.human_delay(0.5))    
+                if not wu_zi_ocr_result:
+                    raise Exception("OCR找不到购买按钮")
+                
+                # 识别到购买按钮，完成购买操作
+                best_bbox, best_text, best_conf = max(wu_zi_ocr_result, key=lambda x: x[2])
+                bbox = np.array(best_bbox)
+                center_x = np.mean(bbox[:, 0])
+                center_y = np.mean(bbox[:, 1])
+                abs_x = left + center_x
+                abs_y = top + center_y
+                pyautogui.click(abs_x,abs_y)
+                time.sleep(self.human_delay(1))
+                print('完成购买')
 
-        #         if not wu_zi_ocr_result:
-        #             raise Exception("OCR找不到购买按钮")
+                self.is_open_item_shop(hwnd)
+                if self.has_item_transaction:
+                    pyautogui.press('esc')
+                    time.sleep(self.human_delay(0.8))    
 
-        #         best_bbox, best_text, best_conf = max(wu_zi_ocr_result, key=lambda x: x[2])
-        #         bbox = np.array(best_bbox)
-        #         center_x = np.mean(bbox[:, 0])
-        #         center_y = np.mean(bbox[:, 1])
-        #         abs_x = left + center_x
-        #         abs_y = top + center_y
-        #         pyautogui.click(abs_x,abs_y)
-        #         time.sleep(self.human_delay(1))
+                # 点击修业任务 自动回师门交任务
+                best_bbox, best_text, best_conf = max(xiu_ye_ocr_result, key=lambda x: x[2])
+                bbox = np.array(best_bbox)
+                center_x = np.mean(bbox[:, 0])
+                center_y = np.mean(bbox[:, 1])
+                abs_x = left + center_x
+                abs_y = top + center_y
+                pyautogui.click(abs_x,abs_y)
+                time.sleep(self.human_delay(10))
 
-        #         best_bbox, best_text, best_conf = max(xiu_ye_ocr_result, key=lambda x: x[2])
-        #         bbox = np.array(best_bbox)
-        #         center_x = np.mean(bbox[:, 0])
-        #         center_y = np.mean(bbox[:, 1])
-        #         abs_x = left + center_x
-        #         abs_y = top + center_y
-        #         pyautogui.click(abs_x,abs_y)
-        #         time.sleep(self.human_delay(10))
+                is_finish = False
 
-        #         is_finish = False
-
-        #         start_time = time.time()
-        #         while time.time() - start_time < timeout:
-        #             count_image = ImageGrab.grab(bbox=(left, top, right, bottom))
-        #             if self.ocr.get_ocr_from_image(count_image, f"第{shi_men_count+1}环"):
-        #                 is_finish = True
-        #                 print(f"第{shi_men_count}环[物资]任务是否完成, 进入下一个修业任务")
-        #                 break
-        #             time.sleep(self.human_delay(2))
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    count_image = ImageGrab.grab(bbox=(left, top, right, bottom))
+                    if self.ocr.get_ocr_from_image(count_image, f"第{current_count+1}环"):
+                        is_finish = True
+                        print(f"第{current_count}环[物资]任务是完成, 进入下一个修业任务")
+                        break
+                    time.sleep(self.human_delay(2))
                         
-        #         if not is_finish:
-        #             raise Exception(f"等待【第{shi_men_count}环】超时")
+                if not is_finish:
+                    raise Exception(f"等待【第{current_count}环】超时")
 
-        #         print(f"修业任务第{shi_men_count}次完成")
-        #         shi_men_count += 1
-        #         pyautogui.keyDown('esc')
+                current_count += 1
+                pyautogui.press('esc')
 
-        #     elif '挑战' in task_text:
-        #         self.auto_reset_round()
+            elif '挑战' in task_text:
+                pyautogui.click(abs_x,abs_y)
+                time.sleep(self.human_delay(1))
 
-        #         is_finish = False
+                self.auto_reset_round()
 
-        #         timeout = 100.0
-        #         start_time = time.time()
-        #         while time.time() - start_time < timeout:
-        #             count_image = ImageGrab.grab(bbox=(left, top, right, bottom))
-        #             if self.ocr.get_ocr_from_image(count_image, f"第{shi_men_count+1}环"):
-        #                 is_finish = True
-        #                 print(f"第{shi_men_count}环修业任务是否完成, 进入下一个修业任务")
-        #                 break
+                is_finish = False
 
-        #             print(f"第{shi_men_count}环[挑战]任务未完成,继续监控")
-        #             time.sleep(self.human_delay(2))
+                timeout = 300
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    count_image = ImageGrab.grab(bbox=(left, top, right, bottom))
+                    if self.ocr.get_ocr_from_image(count_image, f"第{current_count+1}环"):
+                        is_finish = True
+                        print(f"第{current_count}环修业任务完成, 进入下一个修业任务")
+                        break
 
-        #         if not is_finish:
-        #             raise Exception(f"等待【第{shi_men_count}环】超时")
+                    print(f"第{current_count}环[挑战]任务未完成,继续监控")
+                    time.sleep(self.human_delay(2))
 
-        #         print(f"修业任务第{shi_men_count}次完成")
-        #         shi_men_count += 1
-        #         pyautogui.keyDown('esc')
+                if not is_finish:
+                    raise Exception(f"等待【第{current_count}环】超时")
 
-        #     elif '捕捉' in task_text:
-        #         time.sleep(self.human_delay(4))
+                print(f"修业任务第{current_count}次完成")
+                current_count += 1
+                pyautogui.press('esc')
 
-        #         game_image = ImageGrab.grab(bbox=(left, top, right, bottom))
-        #         xin_yu_buy_result = self.ocr.get_ocr_from_image(game_image, "信誉购买")
+            elif '捕捉' in task_text:
+                pyautogui.click(abs_x,abs_y)
+                time.sleep(self.human_delay(1))                
 
-        #         if not xin_yu_buy_result:
-        #             raise Exception("OCR找不到信誉购买按钮")
+                while not self.has_pet_transaction:
+                    self.is_open_pet(hwnd)
+                    time.sleep(self.human_delay(3))
+                
+                while True:
+                    game_image = ImageGrab.grab(bbox=(left, top, right, bottom))
+                    xin_yu_buy_result = self.ocr.get_ocr_from_image(game_image, "信誉购买")
 
-        #         best_bbox, best_text, best_conf = max(xin_yu_buy_result, key=lambda x: x[2])
-        #         bbox = np.array(best_bbox)
-        #         center_x = np.mean(bbox[:, 0])
-        #         center_y = np.mean(bbox[:, 1])
-        #         abs_x = left + center_x
-        #         abs_y = top + center_y
-        #         pyautogui.click(abs_x,abs_y)
-        #         time.sleep(self.human_delay(1))          
+                    if not xin_yu_buy_result:
+                        raise Exception("OCR找不到信誉购买按钮")
 
-        #         timeout = 20.0
-        #         start_time = time.time()
-        #         while time.time() - start_time < timeout:
-        #             count_image = ImageGrab.grab(bbox=(left, top, right, bottom))
-        #             if self.ocr.get_ocr_from_image(count_image, f"第{shi_men_count+1}环"):
-        #                 is_finish = True
-        #                 print(f"第{shi_men_count}环[捕捉宠物]任务完成, 进入下一个修业任务")
-        #                 break
+                    best_bbox, best_text, best_conf = max(xin_yu_buy_result, key=lambda x: x[2])
+                    bbox = np.array(best_bbox)
+                    center_x = np.mean(bbox[:, 0])
+                    center_y = np.mean(bbox[:, 1])
+                    abs_x = left + center_x
+                    abs_y = top + center_y
+                    pyautogui.click(abs_x,abs_y)
+                    time.sleep(self.human_delay(1))  
 
-        #             print(f"第{shi_men_count}环修业任务未完成,继续监控")
-        #             time.sleep(self.human_delay(2))
+                    self.is_open_pet(hwnd)
+                    if not self.has_pet_transaction:
+                        print('完成宠物购买')   
+                        break
 
-        #         if not is_finish:
-        #             raise Exception(f"等待【第{shi_men_count}环】超时")
+                timeout = 20.0
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    count_image = ImageGrab.grab(bbox=(left, top, right, bottom))
+                    if self.ocr.get_ocr_from_image(count_image, f"第{current_count+1}环"):
+                        is_finish = True
+                        print(f"第{current_count}环[捕捉宠物]任务完成, 进入下一个修业任务")
+                        break
 
-        #         print(f"修业任务第{shi_men_count}次完成")
-        #         shi_men_count += 1
-        #         pyautogui.keyDown('esc')
+                    print(f"第{current_count}环修业任务未完成,继续监控")
+                    time.sleep(self.human_delay(2))
+
+                if not is_finish:
+                    raise Exception(f"等待【第{current_count}环】超时")
+
+                print(f"修业任务第{current_count}次完成")
+                current_count += 1
+                pyautogui.press('esc')
+                    

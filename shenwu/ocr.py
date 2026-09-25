@@ -4,7 +4,7 @@ class Ocr:
     def __init__(self):
         self.engine = RapidOCR()
 
-    def get_ocr_from_image(self, img, target_texts):
+    def get_ocr_from_image(self, img, target_texts,return_all=False):
         """
         :param img: 输入图像
         :param target_texts: 目标文本列表，如 ['姓名', '年龄', '地址']；也兼容单字符串输入
@@ -23,4 +23,8 @@ class Ocr:
             for box, text, score in ocr_results 
             if any(target in text for target in target_texts)
         ]
-        return found
+
+        if not return_all:
+            return found
+        else:
+            return found,ocr_results

@@ -24,7 +24,7 @@ class Ocr:
             if any(target in text for target in target_texts)
         ]
 
-        if not return_all:
-            return found
-        else:
+        if return_all:
             return found,ocr_results
+        else:
+            return found

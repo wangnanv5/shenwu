@@ -109,12 +109,12 @@ def check_is_frozen(
     :return: True (卡住/静止), False (画面在动)
     """
     left, top, right, bottom = get_client_rect(hwnd)
-    time.sleep(human_delay(1))
+    time.sleep(10)
 
     img_before = ImageGrab.grab(bbox=(left,top , right, bottom))
 
     # 2. 保持业务执行或等待检测窗口
-    time.sleep(5.0)
+    time.sleep(10.0)
     img_after = ImageGrab.grab(bbox=(left,top , right, bottom))
 
     # 统一转换为 numpy 灰度图

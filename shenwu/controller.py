@@ -389,9 +389,8 @@ class GameController:
 
                             is_frozen, ratio = check_is_frozen(hwnd)
                             if is_frozen:
-                                print(f"⚠️ 警告: 窗口 [] 疑似卡住 (像素变动率: {ratio:.4%})")
+                                print(f"⚠️ 警告: 修业任务-挑战 疑似卡住 (像素变动率: {ratio:.4%})")
                             else:
-                                print(f"✅ 窗口 [] 正常刷新 (像素变动率: {ratio:.4%})")
                                 break
 
                         is_finish = False
@@ -421,10 +420,26 @@ class GameController:
                         pyautogui.press('esc')
 
                     elif '捕捉' in task_text:
-                        pyautogui.click(abs_x,abs_y)
-                        human_delay(3)         
+                        human_delay(1)
+                        while True:
+                            pyautogui.click(abs_x,abs_y)
+                            human_delay(1)
 
-                        self.open_pet_shop()
+                            set_current_top(hwnd)
+                            human_delay(1)
+
+                            self.is_open_pet_shop(hwnd)
+                            if self.hwnd_status[hwnd].is_open_pet_shop:
+                                break
+
+                        # while True:
+                        #     self.open_pet_shop(hwnd)
+
+                        #     is_frozen, ratio = check_is_frozen(hwnd)
+                        #     if is_frozen and :
+                        #         print(f"⚠️ 警告: 修业任务-捕捉宠物疑似卡住 (像素变动率: {ratio:.4%})")
+                        #     else:
+                        #         break
 
                         # 购买完成后,会自动关闭交易窗口,并自动寻路,如果检测到宠物交易窗口,说明没有点击购买按钮
                         while True:

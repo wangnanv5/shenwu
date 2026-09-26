@@ -383,13 +383,16 @@ class GameController:
                     elif '挑战' in task_text:
                         auto_reset_round()
                         human_delay(2)
-                        pyautogui.click(abs_x,abs_y)
 
-                        is_frozen, ratio = check_is_frozen(hwnd)
-                        if is_frozen:
-                            print(f"⚠️ 警告: 窗口 [] 疑似卡住 (像素变动率: {ratio:.4%})")
-                        else:
-                            print(f"✅ 窗口 [] 正常刷新 (像素变动率: {ratio:.4%})")
+                        while True:
+                            pyautogui.click(abs_x,abs_y)
+
+                            is_frozen, ratio = check_is_frozen(hwnd)
+                            if is_frozen:
+                                print(f"⚠️ 警告: 窗口 [] 疑似卡住 (像素变动率: {ratio:.4%})")
+                            else:
+                                print(f"✅ 窗口 [] 正常刷新 (像素变动率: {ratio:.4%})")
+                                break
 
                         is_finish = False
 

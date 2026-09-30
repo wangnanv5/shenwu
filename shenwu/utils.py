@@ -1,3 +1,4 @@
+import mss
 import pyautogui
 import win32gui
 import win32con
@@ -64,16 +65,16 @@ def open_item_shop_keyboard():
     pyautogui.keyUp('alt')
 
 def auto_reset_round():
-    human_delay(0.4)
+    human_delay(0.1)
 
     pyautogui.keyDown('ctrl')
-    human_delay(0.08)  
+    human_delay(0.1)  
 
     pyautogui.keyDown('a')
-    human_delay(0.05)
+    human_delay(0.1)
 
     pyautogui.keyUp('a')
-    human_delay(0.06) 
+    human_delay(0.1) 
 
     pyautogui.keyUp('ctrl')
 
@@ -155,3 +156,119 @@ def check_is_frozen(
 
     # 若变化像素比例极小，判定为画面冻结
     return change_ratio < frozen_ratio_thresh, change_ratio
+
+def make_mss_region(hwnd, roi=None):
+    """
+    根据窗口客户区生成 mss 截图区域。
+
+    参数:
+             roi=(0, 0, 800, 600)
+             表示从窗口客户区左上角开始截 800x600
+
+    返回:
+        mss 可用的 region:
+        {
+            "left": ...,
+            "top": ...,
+            "width": ...,
+            "height": ...
+        }
+    """
+    left, top, right, bottom = get_client_rect(hwnd)
+
+    win_left = int(left)
+    win_top = int(top)
+    win_w = int(right - left)
+    win_h = int(bottom - top)
+
+    if win_w <= 0 or win_h <= 0:
+        raise ValueError("窗口客户区大小异常，可能窗口最小化或不可见")
+
+    if roi is None:
+        x = 0
+        y = 0
+        w = win_w
+        h = win_h
+    else:
+        x, y, w, h = roi
+        x = int(x)
+        y = int(y)
+        w = int(w)
+        h = int(h)
+
+        # 防止超出窗口客户区
+        x = max(0, min(x, win_w - 1))
+        y = max(0, min(y, win_h - 1))
+        w = max(0, min(w, win_w - x))
+        h = max(0, min(h, win_h - y))
+
+    if w <= 0 or h <= 0:
+        raise ValueError("截图区域无效，宽或高为 0")
+
+    region = {
+        "left": win_left + x,
+        "top": win_top + y,
+        "width": w,
+        "height": h
+    }
+
+    return region
+
+def find_best_match(image, templ, threshold, scales=None):
+    """
+    在 image 中模板匹配。
+
+    返回:
+        {
+            "bbox": (x, y, w, h),
+            "score": 匹配分数,
+            "scale": 缩放比例
+        }
+
+    或 None
+    """
+    if scales is None:
+        scales = [1.0]
+
+    best = None
+
+    for scale in scales:
+        scale = float(scale)
+
+        h = int(round(templ.shape[0] * scale))
+        w = int(round(templ.shape[1] * scale))
+
+        if h <= 0 or w <= 0:
+            continue
+
+        if h > image.shape[0] or w > image.shape[1]:
+            continue
+
+        if abs(scale - 1.0) < 1e-6:
+            resized_templ = templ
+        else:
+            interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+            resized_templ = cv2.resize(templ, (w, h), interpolation=interp)
+
+        result = cv2.matchTemplate(
+            image,
+            resized_templ,
+            cv2.TM_CCOEFF_NORMED
+        )
+
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+
+        if max_val >= threshold:
+            if best is None or max_val > best["score"]:
+                best = {
+                    "bbox": (
+                        int(max_loc[0]),
+                        int(max_loc[1]),
+                        w,
+                        h
+                    ),
+                    "score": float(max_val),
+                    "scale": scale
+                }
+
+    return best

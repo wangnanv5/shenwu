@@ -1,3 +1,13 @@
+try:
+    import ctypes
+    try:
+        # Per-Monitor DPI Aware
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        ctypes.windll.user32.SetProcessDPIAware()
+except Exception:
+    pass
+
 import time
 import click
 

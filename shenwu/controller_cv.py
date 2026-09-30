@@ -1,15 +1,17 @@
+import mss
 import pyautogui
 import win32gui
 import win32con
 import time
+import cv2
 import numpy as np
 from PIL import ImageGrab
 from munch import DefaultMunch
 
 from shenwu.config import *
-from shenwu.ocr import Ocr
 from shenwu.utils import (human_delay,get_hwnd_image,set_current_top,open_item_shop_keyboard,
-                          auto_reset_round,open_calendar,get_client_rect,get_abs_x_y,check_is_frozen)
+                          auto_reset_round,open_calendar,get_client_rect,get_abs_x_y,check_is_frozen,
+                          make_mss_region,find_best_match)
 
 import ctypes
 ctypes.windll.shcore.SetProcessDpiAwareness(2)
@@ -18,6 +20,7 @@ pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.2
 window_width = 800
 window_height = 600
+ROI = (0, 0, 800, 600)
 
 fish_width_start = 380
 fish_width_end = 440
@@ -30,7 +33,7 @@ class GameController:
         self.window_width = 800
         self.window_height = 600
         self.hwnd_list = []
-        self.ocr = Ocr()
+        self.cv = mss.MSS()
 
         self.hwnd_status = {}
         self.has_item_transaction = False
@@ -185,6 +188,10 @@ class GameController:
 
     def is_open_calendar(self,hwnd):
         game_image = get_hwnd_image(hwnd)
+        region = make_mss_region(hwnd,ROI)
+        shot = self.cv.grab(region)
+        frame = np.array(shot)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
         print("🔍 判断页面是否包含日程界面...")
         calendar_ocr_result,all_ocr = self.ocr.get_ocr_from_image(game_image, ["每日活动","组队历练","个人历练","周边休闲"],True)
         if len(calendar_ocr_result) > 2:

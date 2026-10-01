@@ -83,7 +83,7 @@ class GameController:
             set_current_top(hwnd)
             auto_reset_round()
 
-            left, top, right, bottom = self.get_client_rect(hwnd)
+            left, top, right, bottom = get_client_rect(hwnd)
             human_delay(1)
 
             # 点击对话框，进入战斗
@@ -131,7 +131,7 @@ class GameController:
         pyautogui.press('f1')
 
         has_fish = True
-        left, top, right, bottom = self.get_client_rect(hwnd)
+        left, top, right, bottom = get_client_rect(hwnd)
         human_delay(1)
 
         while has_fish:
@@ -159,7 +159,7 @@ class GameController:
 
         hwnd = self.hwnd_list[0]
 
-        left, top, right, bottom = self.get_client_rect(hwnd)
+        left, top, right, bottom = get_client_rect(hwnd)
         human_delay(1)
 
         win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)

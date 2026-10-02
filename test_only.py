@@ -27,7 +27,7 @@ except Exception:
 # =========================
 
 # 你的小图标路径
-ICON_PATH = r"C:\Users\27321\Desktop\shenwu\resource\Common\ri_cheng.png"
+ICON_PATH = r"C:\Users\27321\shenwu\resource\Common\is_in_fight.png"
 
 # 匹配阈值，0.75~0.9 之间调
 THRESHOLD = 0.85
@@ -37,7 +37,8 @@ THRESHOLD = 0.85
 USE_MULTISCALE = False
 
 # 如果 USE_MULTISCALE = True，会使用这些缩放比例尝试匹配
-SCALES = np.arange(0.8, 1.21, 0.05)
+SCALES = [1.5]
+# SCALES = np.arange(0.8, 1.21, 0.05)
 
 # 截图区域：
 # None：捕获整个游戏窗口客户区
@@ -253,7 +254,9 @@ def main():
 
             frame = np.array(shot)
             frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
-
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            icon = cv2.cvtColor(icon, cv2.COLOR_BGRA2BGR)
+            icon = cv2.cvtColor(icon, cv2.COLOR_BGR2GRAY)
             # 在这个区域里做模板匹配
             match = find_best_match(
                 frame,

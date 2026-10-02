@@ -8,10 +8,10 @@ try:
 except Exception:
     pass
 
-import time
 import click
 
-from shenwu.controller import GameController
+from shenwu.controller_cv import GameController
+from shenwu.utils import human_delay
 
 game_controller = GameController()
 
@@ -26,7 +26,7 @@ def run_auto_reset_round():
     while True:
         try:
             game_controller.run_auto_reset_round()
-            time.sleep(game_controller.human_delay(5, sigma=0.15))
+            human_delay(5)
         except Exception as e:
             print(e)
 
@@ -34,12 +34,7 @@ def run_auto_reset_round():
 @cli.command()
 def run_xun_you():
     click.echo(f"开始运行巡游的脚本")
-    while True:
-        try:
-            game_controller.run_xun_you()
-            time.sleep(game_controller.human_delay(5, sigma=0.15))
-        except Exception as e:
-            print(e)
+    game_controller.run_xun_you()
 
 # python main.py run-xiu-ye
 @cli.command()
@@ -48,7 +43,7 @@ def run_xiu_ye():
     while True:
         try:
             game_controller.run_xiu_ye()
-            time.sleep(game_controller.human_delay(5, sigma=0.15))
+            human_delay(5)
         except Exception as e:
             print(e)
 

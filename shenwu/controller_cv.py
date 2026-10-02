@@ -1,4 +1,5 @@
 import mss
+import traceback
 import pyautogui
 import win32gui
 import win32con
@@ -11,16 +12,26 @@ from munch import DefaultMunch
 from shenwu.config import *
 from shenwu.utils import (human_delay,get_hwnd_image,set_current_top,open_item_shop_keyboard,
                           auto_reset_round,open_calendar,get_client_rect,get_abs_x_y,check_is_frozen,
-                          make_mss_region,find_best_match)
+                          make_mss_region,find_best_match,get_abs_x_y_cv)
 
 import ctypes
 ctypes.windll.shcore.SetProcessDpiAwareness(2)
 
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.2
-window_width = 800
-window_height = 600
-ROI = (0, 0, 800, 600)
+# 1200 800
+# 900  600
+window_width = 1200
+window_height = 900
+# ROI = (0, 0, 800, 600)
+ROI = (0, 0, 1200, 900)
+
+# 匹配阈值，0.75~0.9 之间调
+THRESHOLD = 0.80
+USE_MULTISCALE = False
+
+# 如果 USE_MULTISCALE = True，会使用这些缩放比例尝试匹配
+SCALES = [1.5]
 
 fish_width_start = 380
 fish_width_end = 440
@@ -40,6 +51,13 @@ class GameController:
         win32gui.EnumWindows(self.get_hwnd, None)
         assert self.hwnd_list , "幻唐志窗口未找到"
         print(f"初始化成功,找到{len(self.hwnd_list)}个游戏窗口")
+
+        self.xun_you_start_fight_icon = cv2.imread(xun_you_start_fight_path)
+        self.xun_you_start_fight_icon = cv2.cvtColor(self.xun_you_start_fight_icon,cv2.COLOR_BGR2GRAY)
+        self.xun_you_finish_icon = cv2.imread(xun_you_finish_path)
+        self.xun_you_finish_icon = cv2.cvtColor(self.xun_you_finish_icon,cv2.COLOR_BGR2GRAY)
+        self.is_in_fight_icon = cv2.imread(is_in_fight_path)
+        self.is_in_fight_icon = cv2.cvtColor(self.is_in_fight_icon,cv2.COLOR_BGR2GRAY)
 
     def get_hwnd(self,hwnd, extra):
         status = DefaultMunch.fromDict(
@@ -76,49 +94,68 @@ class GameController:
                     win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
                 human_delay(5)
 
+    def is_in_fight(self,frame):
+        match = find_best_match(frame,self.is_in_fight_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+        if match is None:
+            return False
+        else:
+            return True
+
     # to-do
     def run_xun_you(self):
-        for hwnd in self.hwnd_list:
-            if self.hwnd_status[hwnd].is_finish_xun_you:
-                continue
+        while True:
+            if all(v.is_finish_xun_you for v in self.hwnd_status.values()):
+                break
 
-            find_dialogue_flag = True
-            set_current_top(hwnd)
-            auto_reset_round()
+            for hwnd in self.hwnd_list:
+                if self.hwnd_status[hwnd].is_finish_xun_you:
+                    continue
 
-            left, top, right, bottom = self.get_client_rect(hwnd)
-            human_delay(1)
-
-            # 点击对话框，进入战斗
-            while find_dialogue_flag:
-                game_image = ImageGrab.grab(bbox=(left, top, left + window_width, top + window_height))
                 try:
-                    print("🔍 检测对话框中...")
-                    ocr_result = self.ocr.get_ocr_from_image(game_image, ["开始战斗","离开场景"])
-
-                    if not ocr_result:
-                        raise Exception("OCR结果为空")
-
-                    best_bbox, best_text, best_conf = max(ocr_result, key=lambda x: x[2])
-
-                    bbox = np.array(best_bbox)
-                    center_x = np.mean(bbox[:, 0])
-                    center_y = np.mean(bbox[:, 1])
-
-                    abs_x = left + center_x
-                    abs_y = top + center_y
-
-                    pyautogui.click(abs_x,abs_y)
+                    set_current_top(hwnd)
+                    auto_reset_round()
                     human_delay(1)
-                    # win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
-                    find_dialogue_flag = False
+                    left, top, right, bottom = get_client_rect(hwnd)
 
-                except Exception as e:
-                    print(f"巡游任务报错 {e}")
-                    find_dialogue_flag = False
-                    human_delay(1)
-                    # win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+                    region = make_mss_region(hwnd,ROI)
 
+                    # 点击对话框，进入战斗
+                    # try:
+                    shot = self.cv.grab(region)
+                    frame = np.array(shot)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+
+                    if self.is_in_fight(frame):
+                        human_delay(5)
+                        continue
+
+                    finish_match = find_best_match(frame,self.xun_you_finish_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+                    
+                    if finish_match is not None:
+                        self.hwnd_status[hwnd].is_finish_xun_you = True
+                        abs_x,abs_y = get_abs_x_y_cv(finish_match["bbox"],left, top)
+                        human_delay(1)
+
+                        pyautogui.click(abs_x,abs_y)
+                        human_delay(5)        
+
+                    else:
+                        match = find_best_match(frame,self.xun_you_start_fight_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+
+                        if match is None:
+                            print ("模式匹配结果为空")
+                            continue
+                        
+                        abs_x,abs_y = get_abs_x_y_cv(match["bbox"],left, top)
+                        human_delay(1)
+
+                        pyautogui.click(abs_x,abs_y)
+                        human_delay(5)
+                    continue
+                except Exception:
+                    print(f"巡游任务出错:")
+                    traceback.print_exc() 
+                    human_delay(5)
     # to do
     def run_fish(self):
         win32gui.EnumWindows(self.get_hwnd, None)
@@ -134,7 +171,7 @@ class GameController:
         pyautogui.press('f1')
 
         has_fish = True
-        left, top, right, bottom = self.get_client_rect(hwnd)
+        left, top, right, bottom = get_client_rect(hwnd)
         human_delay(1)
 
         while has_fish:

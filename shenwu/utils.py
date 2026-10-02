@@ -96,6 +96,16 @@ def get_abs_x_y(best_bbox,left,top):
     abs_y = top + center_y
     return abs_x,abs_y
 
+
+def get_abs_x_y_cv(best_bbox,left,top):
+    x, y, w, h = best_bbox
+    center_x = int(x + w / 2)
+    center_y = int(y + h / 2)
+
+    abs_x = left + center_x
+    abs_y = top + center_y
+    return abs_x,abs_y
+
 def check_is_frozen(
     hwnd,
     pixel_diff_thresh=25,
@@ -213,6 +223,66 @@ def make_mss_region(hwnd, roi=None):
     }
 
     return region
+
+def find_best_match(image, templ, threshold, scales=None):
+    """
+    在 image 中模板匹配。
+
+    返回:
+        {
+            "bbox": (x, y, w, h),
+            "score": 匹配分数,
+            "scale": 缩放比例
+        }
+
+    或 None
+    """
+    if scales is None:
+        scales = [1.0]
+
+    best = None
+
+    for scale in scales:
+        scale = float(scale)
+
+        h = int(round(templ.shape[0] * scale))
+        w = int(round(templ.shape[1] * scale))
+
+        if h <= 0 or w <= 0:
+            continue
+
+        if h > image.shape[0] or w > image.shape[1]:
+            continue
+
+        if abs(scale - 1.0) < 1e-6:
+            resized_templ = templ
+        else:
+            interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+            resized_templ = cv2.resize(templ, (w, h), interpolation=interp)
+
+        result = cv2.matchTemplate(
+            image,
+            resized_templ,
+            cv2.TM_CCOEFF_NORMED
+        )
+
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+
+        if max_val >= threshold:
+            if best is None or max_val > best["score"]:
+                best = {
+                    "bbox": (
+                        int(max_loc[0]),
+                        int(max_loc[1]),
+                        w,
+                        h
+                    ),
+                    "score": float(max_val),
+                    "scale": scale
+                }
+
+    return best
+
 
 def find_best_match(image, templ, threshold, scales=None):
     """

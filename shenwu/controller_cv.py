@@ -347,7 +347,7 @@ class GameController:
             return True
 
     def is_has_xun_lu(self,frame):
-        match = find_best_match(frame,self.has_xiu_ye_task_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+        match = find_best_match(frame,self.has_xun_lu_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
         if match is None:
             return False
         else:
@@ -421,6 +421,7 @@ class GameController:
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
                         if self.is_open_item_shop(frame):
+                            print("✅ 检测到物品寄售页面")
                             break
                         human_delay(1)                    
 
@@ -433,16 +434,18 @@ class GameController:
                         if self.is_item_has_buy(frame):
                             print("✅ 购买物资成功")
                             pyautogui.press('esc')
+                            human_delay(0.5)       
                             break
                     
                     # 确保开始自动寻路
                     while True:
-                        human_delay(1)       
                         self.mouse.click_on([xiu_ye_abs_x, xiu_ye_abs_y])
+                        human_delay(0.1)
                         shot = self.cv.grab(region)
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                        
                         if not self.is_has_xun_lu(frame):
+                            print("✅ 自动寻路结束")
                             break
 
                     # 确保关闭了对话
@@ -452,7 +455,9 @@ class GameController:
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                                
                         if not self.is_has_talk(frame):
+                            print("✅ 取消对话框成功")
                             break
+                        print("检测到对话框,摁下esc")
                         pyautogui.press('esc')
 
                 # 宠物
@@ -485,24 +490,27 @@ class GameController:
 
                     # 确保开始自动寻路
                     while True:
+                        human_delay(1)       
                         shot = self.cv.grab(region)
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                        
+
                         if not self.is_has_xun_lu(frame):
                             print("✅ 自动寻路结束")
                             break
                         self.mouse.click_on([xiu_ye_abs_x, xiu_ye_abs_y])
-                        human_delay(1)       
                     
                     # 确保关闭了对话
                     while True:
+                        human_delay(1)       
                         shot = self.cv.grab(region)
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                        
                         if not self.is_has_talk(frame):
-                            print("✅ 取消对话框")
+                            print("✅ 取消对话框成功")
                             break
                         human_delay(1)
+                        print("检测到对话框,摁下esc")
                         pyautogui.press('esc')
 
                 # 战斗
@@ -511,8 +519,9 @@ class GameController:
 
                     # 确保进入战斗中
                     while True:
+                        human_delay(1)       
                         self.mouse.click_on([xiu_ye_abs_x,xiu_ye_abs_y])
-                        human_delay(20) 
+                        human_delay(5) 
                         shot = self.cv.grab(region)
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
@@ -522,7 +531,7 @@ class GameController:
                             break
 
                     while True:
-                        human_delay(5) 
+                        human_delay(2) 
                         shot = self.cv.grab(region)
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
@@ -540,5 +549,8 @@ class GameController:
                             print("✅ 取消对话框")
                             break                 
                         human_delay(1)
+                        print("检测到对话框,摁下esc")
                         pyautogui.press('esc')
                     
+                else:
+                    print("❌ 未知任务类型")

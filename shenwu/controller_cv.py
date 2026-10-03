@@ -71,9 +71,9 @@ class GameController:
         self.item_shop_buy_button_icon = cv2.cvtColor(self.item_shop_buy_button_icon,cv2.COLOR_BGR2GRAY)    
         self.item_shop_has_buy_icon = cv2.imread(item_has_buy_path)
         self.item_shop_has_buy_icon = cv2.cvtColor(self.item_shop_has_buy_icon,cv2.COLOR_BGR2GRAY)            
-        self.has_talk_icon = cv2.imread(item_has_buy_path)
+        self.has_talk_icon = cv2.imread(close_talk_path)
         self.has_talk_icon = cv2.cvtColor(self.has_talk_icon,cv2.COLOR_BGR2GRAY)      
-        self.has_xun_lu_icon = cv2.imread(item_has_buy_path)
+        self.has_xun_lu_icon = cv2.imread(xun_lu_path)
         self.has_xun_lu_icon = cv2.cvtColor(self.has_xun_lu_icon,cv2.COLOR_BGR2GRAY) 
         # 修业任务类型,分为捕捉宠物 查找物资 挑战
         self.has_xiu_ye_task_icon = cv2.imread(xiu_ye_path)
@@ -95,7 +95,6 @@ class GameController:
                 "is_finish_xiu_ye": False,
                 "is_last_xiu_ye": False,
 
-                "is_open_calendar": False,
                 "is_open_item_shop": False,
                 "is_open_pet_shop": False,
 
@@ -249,37 +248,8 @@ class GameController:
         self.mouse.click_on([abs_x, abs_y])
         human_delay(1)
 
-    def is_open_calendar(self,hwnd):
-        game_image = get_hwnd_image(hwnd)
-        region = make_mss_region(hwnd,ROI)
-        shot = self.cv.grab(region)
-        frame = np.array(shot)
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
-        print("🔍 判断页面是否包含日程界面...")
-        calendar_ocr_result,all_ocr = self.ocr.get_ocr_from_image(game_image, ["每日活动","组队历练","个人历练","周边休闲"],True)
-        if len(calendar_ocr_result) > 2:
-            print("✅ 检测到已经打开日程界面")
-            self.hwnd_status[hwnd].is_open_calendar = True
-            self.hwnd_status[hwnd].calendar_data = all_ocr
-        else:
-            print("❌ 未检测到日程界面")
-            self.hwnd_status[hwnd].is_open_calendar = False
-            self.hwnd_status[hwnd].calendar_data = None
-
     def set_hide_window(self,hwnd):
         win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
-
-    # 确保一定打开了日程界面,并把日历信息写入到hwnd_status中
-    def get_calendar_information(self,hwnd):
-        while True:
-            set_current_top(hwnd)
-            human_delay(1)
-            open_calendar()
-            human_delay(1)
-            self.is_open_calendar(hwnd)
-            human_delay(1)
-            if self.hwnd_status[hwnd].calendar_data is not None and self.hwnd_status[hwnd].is_open_calendar:
-                break
 
     def is_open_item_shop(self,hwnd):
         game_image = get_hwnd_image(hwnd)
@@ -293,30 +263,6 @@ class GameController:
             print("未找到物品寄售页面")
             self.hwnd_status[hwnd].is_open_item_shop = False
             self.hwnd_status[hwnd].item_shop_data = None
-
-    # 确保一定打开了寄售界面,并把日历信息写入到hwnd_status中             
-    def open_item_shop(self,hwnd):
-        while True:
-            set_current_top(hwnd)
-            human_delay(1)
-
-            open_item_shop_keyboard()
-            human_delay(1)
-
-            self.is_open_item_shop(hwnd)
-            if self.hwnd_status[hwnd].is_open_item_shop:
-                break
-
-    def get_shi_men_in_calendar(self,hwnd):
-        if self.hwnd_status[hwnd].calendar_data is None:
-            self.get_calendar_information(hwnd)
-
-        target = "/10"
-        found = [(box, text, score) for box, text, score in self.hwnd_status[hwnd].calendar_data if target in text]
-        assert found, "未在日程中定位到修业任务进度"
-
-        current_count = found[0][1]
-        return int(current_count.split("/")[0])
 
     def is_open_pet_shop(self,frame):
         match = find_best_match(frame,self.pet_shop_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
@@ -385,7 +331,7 @@ class GameController:
                     continue
 
                 set_current_top(hwnd)
-                human_delay(1)
+                human_delay(0.2)
                 
                 # 检查页面是否有修业任务
                 left, top, right, bottom = get_client_rect(hwnd)
@@ -399,7 +345,7 @@ class GameController:
                 if not has_match:
                     print("❌ 未检测到修业任务")
                     self.hwnd_status[hwnd].is_finish_xiu_ye = True
-                    human_delay(1)
+                    human_delay(0.2)
                     continue
 
                 task_type = self.get_task_type(frame)
@@ -409,7 +355,7 @@ class GameController:
                     continue
 
                 xiu_ye_abs_x,xiu_ye_abs_y = get_abs_x_y_cv(match_result["bbox"],left, top)
-                human_delay(1)
+                human_delay(0.2)
                 # 物资
                 if task_type == 1:
 
@@ -423,18 +369,23 @@ class GameController:
                         if self.is_open_item_shop(frame):
                             print("✅ 检测到物品寄售页面")
                             break
-                        human_delay(1)                    
+                        human_delay(3)                    
 
                     # 确保购买成功
                     while True:
                         wu_zi_match = find_best_match(frame,self.item_shop_buy_button_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+                        human_delay(0.1)
                         abs_x,abs_y = get_abs_x_y_cv(wu_zi_match["bbox"],left, top)
-                        human_delay(1)
+                        human_delay(0.1)
                         self.mouse.click_on([abs_x, abs_y])
+
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
                         if self.is_item_has_buy(frame):
                             print("✅ 购买物资成功")
                             pyautogui.press('esc')
-                            human_delay(0.5)       
+                            human_delay(0.1)       
                             break
                     
                     # 确保开始自动寻路
@@ -443,10 +394,10 @@ class GameController:
                         human_delay(0.1)
                         shot = self.cv.grab(region)
                         frame = np.array(shot)
-                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                        
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)    
                         if not self.is_has_xun_lu(frame):
-                            print("✅ 自动寻路结束")
                             break
+                            print("✅ 自动寻路结束")
 
                     # 确保关闭了对话
                     while True:
@@ -490,12 +441,13 @@ class GameController:
 
                     # 确保开始自动寻路
                     while True:
-                        human_delay(1)       
+                        human_delay(2)       
                         shot = self.cv.grab(region)
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                        
 
                         if not self.is_has_xun_lu(frame):
+                            cv2.imwrite("./test.png",frame)
                             print("✅ 自动寻路结束")
                             break
                         self.mouse.click_on([xiu_ye_abs_x, xiu_ye_abs_y])
@@ -521,13 +473,12 @@ class GameController:
                     while True:
                         human_delay(1)       
                         self.mouse.click_on([xiu_ye_abs_x,xiu_ye_abs_y])
-                        human_delay(5) 
+                        human_delay(3) 
                         shot = self.cv.grab(region)
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
                         if self.is_in_fight(frame):
-                            print("✅ 进入战斗中")
-                            human_delay(0.5)
+                            human_delay(0.2)
                             break
 
                     while True:
@@ -536,20 +487,17 @@ class GameController:
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
                         if not self.is_in_fight(frame):
-                            print("✅ 战斗结束")
-                            human_delay(0.5)
+                            human_delay(0.2)
                             break
                     
                     while True:
-                        human_delay(2) 
+                        human_delay(0.2) 
                         shot = self.cv.grab(region)
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                        
                         if not self.is_has_talk(frame):
-                            print("✅ 取消对话框")
                             break                 
-                        human_delay(1)
-                        print("检测到对话框,摁下esc")
+                        human_delay(0.2)
                         pyautogui.press('esc')
                     
                 else:

@@ -19,7 +19,7 @@ pet_shop_buy_button_path = image_dir / "Common" / "pet_shop_buy_button.png"
 item_shop_path = image_dir / "Common" / "item_shop.png"
 item_buy_button_path = image_dir / "Common" / "item_shop_buy_button.png"
 item_has_buy_path = image_dir / "Common" / "item_shop_alread_buy.png"
-item_has_buy_path = image_dir / "Common" / "close_talk.png"
+close_talk_path = image_dir / "Common" / "close_talk.png"
 xun_lu_path = image_dir / "Common" / "xun_lu.png"
 
 # 修业相关

@@ -1,4 +1,4 @@
-from shenwu.controller import GameController
+from shenwu.controller_cv import GameController
 
 if __name__ == '__main__':
     game_controller = GameController()
@@ -12,4 +12,4 @@ if __name__ == '__main__':
     #     except Exception as e:
     #         print(e)
 
-    game_controller.run_auto_reset_round()
+    game_controller.run_xiu_ye()

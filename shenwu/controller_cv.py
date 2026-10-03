@@ -3,11 +3,11 @@ import traceback
 import pyautogui
 import win32gui
 import win32con
-import time
 import cv2
 import numpy as np
 from PIL import ImageGrab
 from munch import DefaultMunch
+from humancursor import SystemCursor
 
 from shenwu.config import *
 from shenwu.utils import (human_delay,get_hwnd_image,set_current_top,open_item_shop_keyboard,
@@ -51,6 +51,7 @@ class GameController:
         win32gui.EnumWindows(self.get_hwnd, None)
         assert self.hwnd_list , "幻唐志窗口未找到"
         print(f"初始化成功,找到{len(self.hwnd_list)}个游戏窗口")
+        self.mouse = SystemCursor()
 
         self.xun_you_start_fight_icon = cv2.imread(xun_you_start_fight_path)
         self.xun_you_start_fight_icon = cv2.cvtColor(self.xun_you_start_fight_icon,cv2.COLOR_BGR2GRAY)
@@ -58,6 +59,32 @@ class GameController:
         self.xun_you_finish_icon = cv2.cvtColor(self.xun_you_finish_icon,cv2.COLOR_BGR2GRAY)
         self.is_in_fight_icon = cv2.imread(is_in_fight_path)
         self.is_in_fight_icon = cv2.cvtColor(self.is_in_fight_icon,cv2.COLOR_BGR2GRAY)
+
+        # 通用
+        self.pet_shop_icon = cv2.imread(pet_shop_path)
+        self.pet_shop_icon = cv2.cvtColor(self.pet_shop_icon,cv2.COLOR_BGR2GRAY)            
+        self.pet_shop_button_icon = cv2.imread(pet_shop_buy_button_path)
+        self.pet_shop_button_icon = cv2.cvtColor(self.pet_shop_button_icon,cv2.COLOR_BGR2GRAY)     
+        self.item_shop_icon = cv2.imread(item_shop_path)
+        self.item_shop_icon = cv2.cvtColor(self.item_shop_icon,cv2.COLOR_BGR2GRAY)              
+        self.item_shop_buy_button_icon = cv2.imread(item_buy_button_path)
+        self.item_shop_buy_button_icon = cv2.cvtColor(self.item_shop_buy_button_icon,cv2.COLOR_BGR2GRAY)    
+        self.item_shop_has_buy_icon = cv2.imread(item_has_buy_path)
+        self.item_shop_has_buy_icon = cv2.cvtColor(self.item_shop_has_buy_icon,cv2.COLOR_BGR2GRAY)            
+        self.has_talk_icon = cv2.imread(item_has_buy_path)
+        self.has_talk_icon = cv2.cvtColor(self.has_talk_icon,cv2.COLOR_BGR2GRAY)      
+        self.has_xun_lu_icon = cv2.imread(item_has_buy_path)
+        self.has_xun_lu_icon = cv2.cvtColor(self.has_xun_lu_icon,cv2.COLOR_BGR2GRAY) 
+        # 修业任务类型,分为捕捉宠物 查找物资 挑战
+        self.has_xiu_ye_task_icon = cv2.imread(xiu_ye_path)
+        self.has_xiu_ye_task_icon = cv2.cvtColor(self.has_xiu_ye_task_icon,cv2.COLOR_BGR2GRAY)     
+        # 修业的任务类型图标,分为宠物 物资 挑战   
+        self.xiu_ye_wu_zi_icon = cv2.imread(xiu_ye_wu_zi_path)
+        self.xiu_ye_wu_zi_icon = cv2.cvtColor(self.xiu_ye_wu_zi_icon,cv2.COLOR_BGR2GRAY)    
+        self.xiu_ye_chong_wu_icon = cv2.imread(xiu_ye_chong_wu_path)
+        self.xiu_ye_chong_wu_icon = cv2.cvtColor(self.xiu_ye_chong_wu_icon,cv2.COLOR_BGR2GRAY)            
+        self.xiu_ye_tiao_zhan_icon = cv2.imread(xiu_ye_tiao_zhan_path)
+        self.xiu_ye_tiao_zhan_icon = cv2.cvtColor(self.xiu_ye_tiao_zhan_icon,cv2.COLOR_BGR2GRAY)          
 
     def get_hwnd(self,hwnd, extra):
         status = DefaultMunch.fromDict(
@@ -101,7 +128,6 @@ class GameController:
         else:
             return True
 
-    # to-do
     def run_xun_you(self):
         while True:
             if all(v.is_finish_xun_you for v in self.hwnd_status.values()):
@@ -136,7 +162,7 @@ class GameController:
                         abs_x,abs_y = get_abs_x_y_cv(finish_match["bbox"],left, top)
                         human_delay(1)
 
-                        pyautogui.click(abs_x,abs_y)
+                        self.mouse.click_on([abs_x, abs_y])
                         human_delay(5)        
 
                     else:
@@ -149,7 +175,7 @@ class GameController:
                         abs_x,abs_y = get_abs_x_y_cv(match["bbox"],left, top)
                         human_delay(1)
 
-                        pyautogui.click(abs_x,abs_y)
+                        self.mouse.click_on([abs_x, abs_y])
                         human_delay(5)
                     continue
                 except Exception:
@@ -183,7 +209,7 @@ class GameController:
                 abs_y = top + start_fight_location.top + start_fight_location.height // 2
 
                 pyautogui.moveTo(abs_x,abs_y, duration=human_delay(0.2))
-                pyautogui.click()
+                self.mouse.perform_click()
                 human_delay(1)
                 has_fish = False
 
@@ -220,7 +246,7 @@ class GameController:
         center_y = np.mean(bbox[:, 1])
         abs_x = left + center_x
         abs_y = top + center_y
-        pyautogui.click(abs_x,abs_y)
+        self.mouse.click_on([abs_x, abs_y])
         human_delay(1)
 
     def is_open_calendar(self,hwnd):
@@ -292,31 +318,63 @@ class GameController:
         current_count = found[0][1]
         return int(current_count.split("/")[0])
 
-    def is_open_pet_shop(self,hwnd):
-        game_image = get_hwnd_image(hwnd)
-        print("🔍 判断页面是否包含购买宠物页面...")
-        pet_ocr_result,all_ocr = self.ocr.get_ocr_from_image(game_image, ["宠物交易","现金购买","信誉购买"],True)
-        if len(pet_ocr_result) > 2:
-            print("✅ 检测到宠物交易页面")
-            self.hwnd_status[hwnd].is_open_pet_shop = True
-            self.hwnd_status[hwnd].pet_shop_data = all_ocr            
+    def is_open_pet_shop(self,frame):
+        match = find_best_match(frame,self.pet_shop_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+        if match is None:
+            return False
         else:
-            print("未找到宠物交易页面")
-            self.hwnd_status[hwnd].is_open_pet_shop = False
-            self.hwnd_status[hwnd].pet_shop_data = None              
+            return True
+        
+    def is_open_item_shop(self,frame):
+        match = find_best_match(frame,self.item_shop_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+        if match is None:
+            return False
+        else:
+            return True
 
-    # 确保一定打开了宠物交易界面,并把信息写入到hwnd_status中             
-    def open_pet_shop(self,hwnd):
-        while True:
-            set_current_top(hwnd)
-            human_delay(1)
+    def is_item_has_buy(self,frame):
+        match = find_best_match(frame,self.item_shop_has_buy_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+        if match is None:
+            return False
+        else:
+            return True
 
-            self.is_open_pet_shop(hwnd)
-            if self.hwnd_status[hwnd].is_open_pet_shop:
-                break
+    def is_has_talk(self,frame):
+        match = find_best_match(frame,self.has_talk_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+        if match is None:
+            return False
+        else:
+            return True
+
+    def is_has_xun_lu(self,frame):
+        match = find_best_match(frame,self.has_xiu_ye_task_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+        if match is None:
+            return False
+        else:
+            return True
+
+    def has_xiu_ye_task(self,frame,return_match=False):
+        match = find_best_match(frame,self.has_xiu_ye_task_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+        if match is None:
+            if return_match:
+                return False,None
+            else:
+                return False
+        else:
+            if return_match:
+                return True,match
+            else:
+                return True
+
+    def get_task_type(self,frame):
+        for index,task_type_icon in zip([1,2,3],[self.xiu_ye_wu_zi_icon,self.xiu_ye_chong_wu_icon,self.xiu_ye_tiao_zhan_icon]):
+            match = find_best_match(frame,task_type_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+            if match is not None:
+                return index
+        return -1
 
     # 修业任务
-    def run_xiu_ye(self,not_scan_cheat=True):
+    def run_xiu_ye(self):
         while True:
             if all(v.is_finish_xiu_ye for v in self.hwnd_status.values()):
                 break
@@ -327,212 +385,160 @@ class GameController:
                     continue
 
                 set_current_top(hwnd)
-                self.hwnd_status[hwnd].is_last_xiu_ye = False
-
-                # 打开日历,开始修业任务 
                 human_delay(1)
-                current_count = self.get_shi_men_in_calendar(hwnd)
+                
+                # 检查页面是否有修业任务
+                left, top, right, bottom = get_client_rect(hwnd)
 
-                if current_count == 10:
-                    print(f"✅ {hwnd}-检测到师门任务完成")
+                region = make_mss_region(hwnd,ROI)
+                shot = self.cv.grab(region)
+                frame = np.array(shot)
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                has_match,match_result = self.has_xiu_ye_task(frame,True)
+
+                if not has_match:
+                    print("❌ 未检测到修业任务")
                     self.hwnd_status[hwnd].is_finish_xiu_ye = True
+                    human_delay(1)
                     continue
 
-                if self.hwnd_status[hwnd].is_open_calendar:
-                    pyautogui.press('esc')
+                task_type = self.get_task_type(frame)
 
-                current_count += 1
-                print("开始修业任务")
-                print(f"当前修业任务进度: {current_count}/10")
-                
-                while current_count <= 10:
-                    if current_count == 10:
-                        self.hwnd_status[hwnd].is_last_xiu_ye = True
+                if task_type == -1:
+                    print("❌ 修业任务类型错误")
+                    continue
 
-                    left, top, right, bottom = get_client_rect(hwnd)
+                xiu_ye_abs_x,xiu_ye_abs_y = get_abs_x_y_cv(match_result["bbox"],left, top)
+                human_delay(1)
+                # 物资
+                if task_type == 1:
 
-                    human_delay(1)
-                    game_image = ImageGrab.grab(bbox=(left, top, right, bottom))
+                    # 确保打开了物品寄售界面
+                    while True:
+                        open_item_shop_keyboard()
+                        human_delay(1) 
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                        if self.is_open_item_shop(frame):
+                            break
+                        human_delay(1)                    
 
-                    print("🔍 检测修业任务中...")
-                    if not_scan_cheat:
-                        xiu_ye_ocr_result = ImageGrab.grab(bbox=(left,top , left+window_width, top+window_height))
-                    else:
-                        xiu_ye_ocr_result = self.ocr.get_ocr_from_image(game_image, "修业")
-
-                    if not xiu_ye_ocr_result:
-                        continue
-
-                    task_text = xiu_ye_ocr_result[0][1]
-                    print(f"✅ 检测到任务 {task_text}")
-
-                    best_bbox, best_text, best_conf = max(xiu_ye_ocr_result, key=lambda x: x[2])
-                    abs_x,abs_y = get_abs_x_y(best_bbox,left,top)
-
-                    if '物资' in task_text:
-                        self.open_item_shop(hwnd)
-                        found = [
-                            (box, text, score) 
-                            for box, text, score in self.hwnd_status[hwnd].item_shop_data 
-                            if '购买' in text 
-                        ]
-
+                    # 确保购买成功
+                    while True:
+                        wu_zi_match = find_best_match(frame,self.item_shop_buy_button_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+                        abs_x,abs_y = get_abs_x_y_cv(wu_zi_match["bbox"],left, top)
                         human_delay(1)
-
-                        if not found:                                                    
-                            print(" ❌ 修业物资任务找不到购买按钮")
+                        self.mouse.click_on([abs_x, abs_y])
+                        if self.is_item_has_buy(frame):
+                            print("✅ 购买物资成功")
                             pyautogui.press('esc')
-                            human_delay(1)
-                            self.hwnd_status[hwnd].is_open_item_shop = False
-                            continue
-                        
-                        # 识别到购买按钮，完成购买操作                                                      
-                        best_bbox, best_text, best_conf = max(found, key=lambda x: x[2])
-                        abs_x,abs_y = get_abs_x_y(best_bbox,left,top)
+                            break
+                    
+                    # 确保开始自动寻路
+                    while True:
+                        human_delay(1)       
+                        self.mouse.click_on([xiu_ye_abs_x, xiu_ye_abs_y])
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                        
+                        if not self.is_has_xun_lu(frame):
+                            break
+
+                    # 确保关闭了对话
+                    while True:
                         human_delay(1)
-                        pyautogui.click(abs_x,abs_y)
-                        print('完成购买')
-
-                        self.is_open_item_shop(hwnd)
-                        if self.hwnd_status[hwnd].is_open_item_shop:
-                            pyautogui.press('esc')
-                            human_delay(1)
-
-                        # 点击修业任务 自动回师门交任务
-                        best_bbox, best_text, best_conf = max(xiu_ye_ocr_result, key=lambda x: x[2])
-                        abs_x,abs_y = get_abs_x_y(best_bbox,left,top)
-                        pyautogui.click(abs_x,abs_y)
-                        human_delay(10)
-
-                        is_finish = False
-                        timeout = 120.0  # 最大等待时间（秒），防止永久卡死
-                        start_time = time.time()
-                        while time.time() - start_time < timeout:
-                            count_image = ImageGrab.grab(bbox=(left, top, right, bottom))
-                            if self.hwnd_status[hwnd].is_last_xiu_ye:
-                                if not self.ocr.get_ocr_from_image(count_image, "修业"):
-                                    print("✅ 修业任务完成")
-                                    break
-
-                            elif self.ocr.get_ocr_from_image(count_image, f"第{current_count+1}环"):
-                                is_finish = True
-                                print(f"第{current_count}环[物资]任务是完成, 进入下一个修业任务")
-                                break
-
-                            human_delay(2)
-                                
-                        if not is_finish:
-                            raise Exception(f"等待【第{current_count}环】超时")
-
-                        current_count += 1
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                                
+                        if not self.is_has_talk(frame):
+                            break
                         pyautogui.press('esc')
 
-                    elif '挑战' in task_text:
-                        auto_reset_round()
-                        human_delay(2)
+                # 宠物
+                elif task_type == 2:
+                    self.mouse.click_on([xiu_ye_abs_x,xiu_ye_abs_y])
+                    human_delay(1) 
 
-                        while True:
-                            pyautogui.click(abs_x,abs_y)
-
-                            is_frozen, ratio = check_is_frozen(hwnd)
-                            if is_frozen:
-                                print(f"⚠️ 警告: 修业任务-挑战 疑似卡住 (像素变动率: {ratio:.4%})")
-                            else:
-                                break
-
-                        is_finish = False
-
-                        timeout = 300
-                        start_time = time.time()
-                        while time.time() - start_time < timeout:
-                            count_image = ImageGrab.grab(bbox=(left, top, right, bottom))
-                            if self.hwnd_status[hwnd].is_last_xiu_ye:
-                                if not self.ocr.get_ocr_from_image(count_image, "修业"):
-                                    print("✅ 修业任务完成")
-                                    return
-
-                            elif self.ocr.get_ocr_from_image(count_image, f"第{current_count+1}环"):
-                                is_finish = True
-                                print(f"第{current_count}环修业任务完成, 进入下一个修业任务")
-                                break
-
-                            print(f"第{current_count}环[挑战]任务未完成,继续监控")
-                            human_delay(2)
-
-                        if not is_finish:
-                            raise Exception(f"等待【第{current_count}环】超时")
-
-                        print(f"修业任务第{current_count}次完成")
-                        current_count += 1
-                        pyautogui.press('esc')
-
-                    elif '捕捉' in task_text:
+                    # 检测是否打开了宠物购买页面
+                    while True:
+                        if self.is_open_pet_shop(frame):
+                            pet_buy_button_match = find_best_match(frame,self.pet_shop_button_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+                            print("✅ 打开了宠物购买页面")
+                            break
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
                         human_delay(1)
-                        while True:
-                            pyautogui.click(abs_x,abs_y)
-                            human_delay(1)
 
-                            set_current_top(hwnd)
-                            human_delay(1)
+                    # 确保购买成功
+                    while True:
+                        abs_x,abs_y = get_abs_x_y_cv(pet_buy_button_match["bbox"],left, top)
+                        self.mouse.click_on([abs_x, abs_y])
+                        human_delay(1)
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                        if not self.is_open_pet_shop(frame):
+                            print("✅ 购买宠物成功")
+                            break
 
-                            self.is_open_pet_shop(hwnd)
-                            if self.hwnd_status[hwnd].is_open_pet_shop:
-                                break
-
-                        # while True:
-                        #     self.open_pet_shop(hwnd)
-
-                        #     is_frozen, ratio = check_is_frozen(hwnd)
-                        #     if is_frozen and :
-                        #         print(f"⚠️ 警告: 修业任务-捕捉宠物疑似卡住 (像素变动率: {ratio:.4%})")
-                        #     else:
-                        #         break
-
-                        # 购买完成后,会自动关闭交易窗口,并自动寻路,如果检测到宠物交易窗口,说明没有点击购买按钮
-                        while True:
-                            found = [
-                                    (box, text, score) 
-                                    for box, text, score in self.hwnd_status[hwnd].pet_shop_data 
-                                    if '信誉购买' in text 
-                                                    ]
-
-                            if not found:
-                                print(" ❌ 修业买宠任务找不到信誉购买按钮")
-                                pyautogui.press('esc')
-                                human_delay(1)
-                                self.hwnd_status[hwnd].is_open_item_shop = False
-
-                            best_bbox, best_text, best_conf = max(found, key=lambda x: x[2])
-                            abs_x,abs_y = get_abs_x_y(best_bbox,left,top)
-                            pyautogui.click(abs_x,abs_y)
-                            human_delay(1)  
-
-                            self.is_open_pet_shop(hwnd)
-                            if not self.hwnd_status[hwnd].is_open_pet_shop:
-                                print('完成宠物购买')   
-                                break
-
-                        timeout = 20.0
-                        start_time = time.time()
-                        while time.time() - start_time < timeout:
-                            count_image = ImageGrab.grab(bbox=(left, top, right, bottom))
-                            if self.hwnd_status[hwnd].is_last_xiu_ye:
-                                if not self.ocr.get_ocr_from_image(count_image, "修业"):
-                                    print("✅ 修业任务完成")
-                                    return
-                                
-                            elif self.ocr.get_ocr_from_image(count_image, f"第{current_count+1}环"):
-                                is_finish = True
-                                print(f"第{current_count}环[捕捉宠物]任务完成, 进入下一个修业任务")
-                                break
-
-                            print(f"第{current_count}环修业任务未完成,继续监控")
-                            human_delay(2)
-
-                        if not is_finish:
-                            raise Exception(f"等待【第{current_count}环】超时")
-
-                        print(f"修业任务第{current_count}次完成")
-                        current_count += 1
+                    # 确保开始自动寻路
+                    while True:
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                        
+                        if not self.is_has_xun_lu(frame):
+                            print("✅ 自动寻路结束")
+                            break
+                        self.mouse.click_on([xiu_ye_abs_x, xiu_ye_abs_y])
+                        human_delay(1)       
+                    
+                    # 确保关闭了对话
+                    while True:
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                        
+                        if not self.is_has_talk(frame):
+                            print("✅ 取消对话框")
+                            break
+                        human_delay(1)
                         pyautogui.press('esc')
-                        
+
+                # 战斗
+                elif task_type == 3:
+                    auto_reset_round()
+
+                    # 确保进入战斗中
+                    while True:
+                        self.mouse.click_on([xiu_ye_abs_x,xiu_ye_abs_y])
+                        human_delay(20) 
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                        if self.is_in_fight(frame):
+                            print("✅ 进入战斗中")
+                            human_delay(0.5)
+                            break
+
+                    while True:
+                        human_delay(5) 
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                        if not self.is_in_fight(frame):
+                            print("✅ 战斗结束")
+                            human_delay(0.5)
+                            break
+                    
+                    while True:
+                        human_delay(2) 
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                        
+                        if not self.is_has_talk(frame):
+                            print("✅ 取消对话框")
+                            break                 
+                        human_delay(1)
+                        pyautogui.press('esc')
+                    

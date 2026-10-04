@@ -98,6 +98,10 @@ class GameController:
         self.xiu_ye_chong_wu_icon = cv2.cvtColor(self.xiu_ye_chong_wu_icon,cv2.COLOR_BGR2GRAY)            
         self.xiu_ye_tiao_zhan_icon = cv2.imread(xiu_ye_tiao_zhan_path)
         self.xiu_ye_tiao_zhan_icon = cv2.cvtColor(self.xiu_ye_tiao_zhan_icon,cv2.COLOR_BGR2GRAY)          
+        # 修炼相关
+        self.xiu_lian_no_finish_icon = cv2.imread(xiu_lian_path)
+        self.xiu_lian_no_finish_icon = cv2.cvtColor(self.xiu_lian_no_finish_icon,cv2.COLOR_BGR2GRAY)    
+
 
     def get_hwnd(self,hwnd, extra):
         status = DefaultMunch.fromDict(
@@ -455,32 +459,6 @@ class GameController:
                 human_delay(0.2)
                 # 物资
                 if task_type == 1:
-                    # 确保打开了物品寄售界面
-                    # while True:
-                    #     open_item_shop_keyboard()
-                    #     human_delay(1) 
-                    #     shot = self.cv.grab(region)
-                    #     frame = np.array(shot)
-                    #     frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
-                    #     if self.is_open_item_shop(frame):
-                    #         break
-                    #     human_delay(3)   
-                    # 确保购买成功
-                    # while True:
-                    #     wu_zi_match = find_best_match(frame,self.item_shop_buy_button_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
-                    #     human_delay(0.1)
-                    #     abs_x,abs_y = get_abs_x_y_cv(wu_zi_match["bbox"],left, top)
-                    #     human_delay(0.1)
-                    #     self.mouse.click_on([abs_x, abs_y])
-
-                    #     shot = self.cv.grab(region)
-                    #     frame = np.array(shot)
-                    #     frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
-                    #     if self.is_item_has_buy(frame):
-                    #         pyautogui.press('esc')
-                    #         human_delay(0.1)       
-                    #         break
-                    #               
                     self.mouse.click_on([xiu_ye_abs_x,xiu_ye_abs_y])
                     human_delay(1)                                  
                     while True:
@@ -635,3 +613,22 @@ class GameController:
                     if self.is_open_ri_cheng(hwnd):
                         break
                     human_delay(1)
+
+                # 点击修炼按钮,开始自动寻路 
+                left, top, right, bottom = get_client_rect(hwnd)
+
+                region = make_mss_region(hwnd,ROI)
+                shot = self.cv.grab(region)
+                frame = np.array(shot)
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                match = find_best_match(frame,self.xiu_lian_no_finish_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+                xiu_lian_abs_x,xiu_lian_abs_y = get_abs_x_y_cv(match["bbox"],left, top)
+                
+                while True:
+                    self.mouse.click_on([xiu_lian_abs_x, xiu_lian_abs_y]) 
+                    human_delay(0.1)
+                    shot = self.cv.grab(region)
+                    frame = np.array(shot)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)    
+                    if not self.is_has_xun_lu(frame):
+                        break                

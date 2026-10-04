@@ -40,12 +40,7 @@ def run_xun_you():
 @cli.command()
 def run_xiu_ye():
     click.echo(f"开始运行修业的脚本")
-    while True:
-        try:
-            game_controller.run_xiu_ye()
-            human_delay(5)
-        except Exception as e:
-            print(e)
+    game_controller.run_xiu_ye()
 
 if __name__ == "__main__":
     cli()

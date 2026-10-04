@@ -61,18 +61,31 @@ class GameController:
         self.is_in_fight_icon = cv2.cvtColor(self.is_in_fight_icon,cv2.COLOR_BGR2GRAY)
 
         # 通用
+        # 日历
+        self.ri_cheng_icon = cv2.imread(ri_cheng_path)
+        self.ri_cheng_icon = cv2.cvtColor(self.ri_cheng_icon,cv2.COLOR_BGR2GRAY) 
+        # 宠物商店
         self.pet_shop_icon = cv2.imread(pet_shop_path)
         self.pet_shop_icon = cv2.cvtColor(self.pet_shop_icon,cv2.COLOR_BGR2GRAY)            
+        # 宠物商店购买按钮
         self.pet_shop_button_icon = cv2.imread(pet_shop_buy_button_path)
-        self.pet_shop_button_icon = cv2.cvtColor(self.pet_shop_button_icon,cv2.COLOR_BGR2GRAY)     
+        self.pet_shop_button_icon = cv2.cvtColor(self.pet_shop_button_icon,cv2.COLOR_BGR2GRAY) 
+        # 寄售商店页面    
         self.item_shop_icon = cv2.imread(item_shop_path)
         self.item_shop_icon = cv2.cvtColor(self.item_shop_icon,cv2.COLOR_BGR2GRAY)              
+        # 寄售商店购买按钮
         self.item_shop_buy_button_icon = cv2.imread(item_buy_button_path)
-        self.item_shop_buy_button_icon = cv2.cvtColor(self.item_shop_buy_button_icon,cv2.COLOR_BGR2GRAY)    
+        self.item_shop_buy_button_icon = cv2.cvtColor(self.item_shop_buy_button_icon,cv2.COLOR_BGR2GRAY)  
+        # 寄售商店已购买弹出来的图标  
         self.item_shop_has_buy_icon = cv2.imread(item_has_buy_path)
-        self.item_shop_has_buy_icon = cv2.cvtColor(self.item_shop_has_buy_icon,cv2.COLOR_BGR2GRAY)            
+        self.item_shop_has_buy_icon = cv2.cvtColor(self.item_shop_has_buy_icon,cv2.COLOR_BGR2GRAY)           
+        # 寄售商店的需求物资图标
+        self.item_xu_qiu_icon = cv2.imread(item_xu_qiu_path)
+        self.item_xu_qiu_icon = cv2.cvtColor(self.item_xu_qiu_icon,cv2.COLOR_BGR2GRAY)             
+        # npc对话弹框
         self.has_talk_icon = cv2.imread(close_talk_path)
         self.has_talk_icon = cv2.cvtColor(self.has_talk_icon,cv2.COLOR_BGR2GRAY)      
+        # 寻路图标
         self.has_xun_lu_icon = cv2.imread(xun_lu_path)
         self.has_xun_lu_icon = cv2.cvtColor(self.has_xun_lu_icon,cv2.COLOR_BGR2GRAY) 
         # 修业任务类型,分为捕捉宠物 查找物资 挑战
@@ -93,6 +106,7 @@ class GameController:
                 "has_item_transaction": False,
                 "is_finish_xun_you": False,
                 "is_finish_xiu_ye": False,
+                "is_finish_xiu_lian": False,
                 "is_last_xiu_ye": False,
 
                 "is_open_item_shop": False,
@@ -278,6 +292,89 @@ class GameController:
         else:
             return True
 
+    def is_has_item_xu_qiu(self,frame,region=None):
+        match = find_best_match(frame,self.item_xu_qiu_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+        # x, y, w, h = match["bbox"]
+        # score = match["score"]
+        # scale = match["scale"]
+
+        # # 画 bbox
+        # cv2.rectangle(
+        #     frame,
+        #     (x, y),
+        #     (x + w, y + h),
+        #     (0, 255, 0),
+        #     2
+        # )
+
+        # # 画分数标签
+        # label = f"{score:.2f}"
+        # if USE_MULTISCALE:
+        #     label += f" x{scale:.2f}"
+
+        # font = cv2.FONT_HERSHEY_SIMPLEX
+        # font_scale = 0.6
+        # thickness = 2
+
+        # (tw, th), baseline = cv2.getTextSize(
+        #     label,
+        #     font,
+        #     font_scale,
+        #     thickness
+        # )
+
+        # label_y = max(y - 10, th + 10)
+
+        # cv2.rectangle(
+        #     frame,
+        #     (x, label_y - th - 8),
+        #     (x + tw + 8, label_y + baseline),
+        #     (0, 255, 0),
+        #     -1
+        # )
+
+        # cv2.putText(
+        #     frame,
+        #     label,
+        #     (x + 4, label_y),
+        #     font,
+        #     font_scale,
+        #     (0, 0, 0),
+        #     thickness
+        # )
+
+        # # 当前 bbox 是相对于截图区域 region 的坐标
+        # # 如果要转换成屏幕绝对坐标，需要加上 region 的 left/top
+        # screen_x = region["left"] + x
+        # screen_y = region["top"] + y
+
+        # print(
+        #     f"\rlocal bbox=(x={x}, y={y}, w={w}, h={h}) | "
+        #     f"screen top-left=({screen_x}, {screen_y}) | "
+        #     f"score={score:.3f} | scale={scale:.2f}   ",
+        #     end="",
+        #     flush=True
+        # )     
+
+        # cv2.imshow("Window Region Template Match - q to quit", frame)
+
+        # key = cv2.waitKey(1) & 0xFF
+
+        # if key == ord("q"):
+        #     return           
+        
+        if match is None:
+            return False
+        else:
+            return True
+
+    def is_open_ri_cheng(self,frame):
+        match = find_best_match(frame,self.ri_cheng_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+        if match is None:
+            return False
+        else:
+            return True
+
     def is_item_has_buy(self,frame):
         match = find_best_match(frame,self.item_shop_has_buy_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
         if match is None:
@@ -358,34 +455,62 @@ class GameController:
                 human_delay(0.2)
                 # 物资
                 if task_type == 1:
-
                     # 确保打开了物品寄售界面
+                    # while True:
+                    #     open_item_shop_keyboard()
+                    #     human_delay(1) 
+                    #     shot = self.cv.grab(region)
+                    #     frame = np.array(shot)
+                    #     frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                    #     if self.is_open_item_shop(frame):
+                    #         break
+                    #     human_delay(3)   
+                    # 确保购买成功
+                    # while True:
+                    #     wu_zi_match = find_best_match(frame,self.item_shop_buy_button_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+                    #     human_delay(0.1)
+                    #     abs_x,abs_y = get_abs_x_y_cv(wu_zi_match["bbox"],left, top)
+                    #     human_delay(0.1)
+                    #     self.mouse.click_on([abs_x, abs_y])
+
+                    #     shot = self.cv.grab(region)
+                    #     frame = np.array(shot)
+                    #     frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                    #     if self.is_item_has_buy(frame):
+                    #         pyautogui.press('esc')
+                    #         human_delay(0.1)       
+                    #         break
+                    #               
+                    self.mouse.click_on([xiu_ye_abs_x,xiu_ye_abs_y])
+                    human_delay(1)                                  
                     while True:
-                        open_item_shop_keyboard()
-                        human_delay(1) 
                         shot = self.cv.grab(region)
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
                         if self.is_open_item_shop(frame):
-                            print("✅ 检测到物品寄售页面")
+                            item_buy_button_match = find_best_match(frame,self.item_shop_buy_button_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
                             break
-                        human_delay(3)                    
+                        human_delay(0.5)
 
-                    # 确保购买成功
+                    # 确保出现"需要"的标志
                     while True:
-                        wu_zi_match = find_best_match(frame,self.item_shop_buy_button_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
-                        human_delay(0.1)
-                        abs_x,abs_y = get_abs_x_y_cv(wu_zi_match["bbox"],left, top)
-                        human_delay(0.1)
-                        self.mouse.click_on([abs_x, abs_y])
-
+                        human_delay(1)
                         shot = self.cv.grab(region)
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
-                        if self.is_item_has_buy(frame):
-                            print("✅ 购买物资成功")
-                            pyautogui.press('esc')
-                            human_delay(0.1)       
+                        if self.is_has_item_xu_qiu(frame):
+                            break
+                        human_delay(1)
+
+                    # 确保购买成功
+                    while True:
+                        abs_x,abs_y = get_abs_x_y_cv(item_buy_button_match["bbox"],left, top)
+                        self.mouse.click_on([abs_x, abs_y])
+                        human_delay(1)
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                        if not self.is_open_item_shop(frame):
                             break
                     
                     # 确保开始自动寻路
@@ -397,7 +522,6 @@ class GameController:
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)    
                         if not self.is_has_xun_lu(frame):
                             break
-                            print("✅ 自动寻路结束")
 
                     # 确保关闭了对话
                     while True:
@@ -406,7 +530,6 @@ class GameController:
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                                
                         if not self.is_has_talk(frame):
-                            print("✅ 取消对话框成功")
                             break
                         print("检测到对话框,摁下esc")
                         pyautogui.press('esc')
@@ -418,13 +541,12 @@ class GameController:
 
                     # 检测是否打开了宠物购买页面
                     while True:
-                        if self.is_open_pet_shop(frame):
-                            pet_buy_button_match = find_best_match(frame,self.pet_shop_button_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
-                            print("✅ 打开了宠物购买页面")
-                            break
                         shot = self.cv.grab(region)
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                        if self.is_open_pet_shop(frame):
+                            pet_buy_button_match = find_best_match(frame,self.pet_shop_button_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+                            break
                         human_delay(1)
 
                     # 确保购买成功
@@ -436,7 +558,6 @@ class GameController:
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
                         if not self.is_open_pet_shop(frame):
-                            print("✅ 购买宠物成功")
                             break
 
                     # 确保开始自动寻路
@@ -447,8 +568,6 @@ class GameController:
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                        
 
                         if not self.is_has_xun_lu(frame):
-                            cv2.imwrite("./test.png",frame)
-                            print("✅ 自动寻路结束")
                             break
                         self.mouse.click_on([xiu_ye_abs_x, xiu_ye_abs_y])
                     
@@ -459,10 +578,8 @@ class GameController:
                         frame = np.array(shot)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                        
                         if not self.is_has_talk(frame):
-                            print("✅ 取消对话框成功")
                             break
                         human_delay(1)
-                        print("检测到对话框,摁下esc")
                         pyautogui.press('esc')
 
                 # 战斗
@@ -502,3 +619,19 @@ class GameController:
                     
                 else:
                     print("❌ 未知任务类型")
+    
+    def run_xiu_lian(self):
+        while True:
+            if all(v.is_finish_xiu_lian for v in self.hwnd_status.values()):
+                break
+
+            for hwnd in self.hwnd_list:
+                if self.hwnd_status[hwnd].is_finish_xiu_lian:
+                    continue
+
+                # 打开日历
+                while True:
+                    open_calendar()
+                    if self.is_open_ri_cheng(hwnd):
+                        break
+                    human_delay(1)

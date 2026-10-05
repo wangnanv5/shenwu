@@ -361,6 +361,30 @@ def right_click(cursor,target_point):
     human_delay( 0.1)
     pyautogui.rightClick()
 
+def keep_largest_component(mask: np.ndarray) -> np.ndarray:
+    """
+    只保留二值mask中面积最大的连通域
+    :param mask: uint8 二值图 (0/255)
+    :return: 仅含最大连通域的 uint8 二值图
+    """
+    # 确保输入是二值图
+    if mask.dtype != np.uint8:
+        mask = (mask > 0).astype(np.uint8) * 255
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if not contours:
+        return np.zeros_like(mask)
+
+    # 找面积最大的轮廓
+    largest = max(contours, key=cv2.contourArea)
+
+    # 创建纯黑mask，仅绘制最大轮廓（填充）
+    result = np.zeros_like(mask)
+    cv2.drawContours(result, [largest], -1, 255, thickness=cv2.FILLED)
+
+    return result
+
 def get_color(frame,color=None):
     game_image_array = np.array(frame)
     h,w = game_image_array.shape[:2]
@@ -391,10 +415,11 @@ def get_color(frame,color=None):
         mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
         mask  = cv2.bitwise_or(mask_red1, mask_red2)  # 两段合并
 
+    mask = keep_largest_component(mask)
+
     # 先闭运算：连接相近的文字像素
     kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5))
     mask_closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close)
-    cv2.imwrite("blue_icon.png", mask_closed)
 
     # 再开运算：去除细小噪点
     kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))

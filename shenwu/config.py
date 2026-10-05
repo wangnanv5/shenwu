@@ -27,6 +27,8 @@ item_buy_button_path = image_dir / "Common" / "item_shop_buy_button.png"
 item_has_buy_path = image_dir / "Common" / "item_shop_alread_buy.png"
 # 商品寄售需求的图标
 item_xu_qiu_path = image_dir / "Common" / "item_xu_qiu.png"
+# 商品寄售价格确认按钮
+item_que_ren_path = image_dir / "Common" / "item_shop_que_ren.png"
 # 关闭npc对话框的关闭按钮
 close_talk_path = image_dir / "Common" / "close_talk.png"
 # 自动寻路的图标
@@ -54,4 +56,8 @@ xiu_lian_finish_path = image_dir / "XiuLian" / "xiu_lian_finish.png"
 xiu_lian_talk_path = image_dir / "XiuLian" / "xiu_lian_talk.png"
 # 修炼任务
 xiu_lian_task_path = image_dir / "XiuLian" / "xiu_lian_task.png"
-xiu_lian_task_path = image_dir / "XiuLian" / "xiu_lian_task.png"
+xiu_lian_xun_wu_path = image_dir / "XiuLian" / "xiu_lian_xun_wu.png"
+xiu_lian_zhao_ren_path = image_dir / "XiuLian" / "xiu_lian_zhao_ren.png"
+xiu_lian_feng_dao_ren_path = image_dir / "XiuLian" / "xiu_lian_dao_ren.png"
+xiu_lian_bao_hu_feng_dao_ren_path = image_dir / "XiuLian" / "bao_hu_feng_dao_ren.png"
+# xiu_lian_xun_wu_path = image_dir / "XiuLian" / "xiu_lian_task.png"

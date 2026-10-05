@@ -8,6 +8,9 @@ import random
 import math
 import numpy as np
 from PIL import ImageGrab
+from humancursor import SystemCursor
+
+cursor = SystemCursor()
 
 def get_window_rect(hwnd):
         """
@@ -85,6 +88,16 @@ def open_calendar():
     pyautogui.keyDown('y')
     human_delay(0.1)
     pyautogui.keyUp('y')
+    human_delay(0.1)  
+    pyautogui.keyUp('alt')
+
+def open_bag_keyboard():
+    human_delay(0.1)
+    pyautogui.keyDown('alt')
+    human_delay(0.1)
+    pyautogui.keyDown('e')
+    human_delay(0.1)
+    pyautogui.keyUp('e')
     human_delay(0.1)  
     pyautogui.keyUp('alt')
 
@@ -342,3 +355,65 @@ def find_best_match(image, templ, threshold, scales=None):
                 }
 
     return best
+
+def right_click(cursor,target_point):
+    cursor.move_to(target_point)
+    human_delay( 0.1)
+    pyautogui.rightClick()
+
+def get_color(frame,color=None):
+    game_image_array = np.array(frame)
+    h,w = game_image_array.shape[:2]
+
+    x1, y1 = int(w * 0.66), int(h * 0.27)
+    x2, y2 = int(w * 0.95), int(h * 0.38)
+    frame = game_image_array[y1:y2,x1:x2]
+
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+    
+    if color == "blue":
+        lower = np.array([85,  100, 150])
+        upper = np.array([130, 255, 255])
+        mask  = cv2.inRange(hsv, lower, upper)
+    elif color == "yellow":
+        lower = np.array([20, 100, 150])
+        upper = np.array([45, 255, 255])
+        mask = cv2.inRange(hsv, lower, upper)
+    elif color == "red":
+        lower_red1 = np.array([0,   120, 150])   # 红色段1: H=0~10
+        upper_red1 = np.array([10,  255, 255])
+
+        lower_red2 = np.array([170, 120, 150])   # 红色段2: H=170~180
+        upper_red2 = np.array([180, 255, 255])
+
+        mask_red1 = cv2.inRange(hsv, lower_red1, upper_red1)
+        mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
+        mask  = cv2.bitwise_or(mask_red1, mask_red2)  # 两段合并
+
+    # 先闭运算：连接相近的文字像素
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5))
+    mask_closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close)
+
+    # 再开运算：去除细小噪点
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    mask_clean = cv2.morphologyEx(mask_closed, cv2.MORPH_OPEN, kernel_open)    
+
+    contours, _ = cv2.findContours(
+        mask_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    task_found = False
+
+    for cnt in contours:
+        x, y, cw, ch = cv2.boundingRect(cnt)
+        area = cw * ch    
+        aspect_ratio = cw / max(ch, 1)
+
+        if area > 500 and aspect_ratio > 1.5:
+            task_found = True
+            return x,y,cw,ch
+
+    if not task_found:
+        print("❌ 未检测到修业任务")   
+        return None     

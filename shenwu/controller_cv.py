@@ -10,8 +10,8 @@ from munch import DefaultMunch
 from humancursor import SystemCursor
 
 from shenwu.config import *
-from shenwu.utils import (human_delay,get_hwnd_image,set_current_top,open_item_shop_keyboard,
-                          auto_reset_round,open_calendar,get_client_rect,get_abs_x_y,check_is_frozen,
+from shenwu.utils import (human_delay,get_hwnd_image,set_current_top,right_click,get_color,
+                          auto_reset_round,open_calendar,get_client_rect,open_bag_keyboard,
                           make_mss_region,find_best_match,get_abs_x_y_cv)
 
 import ctypes
@@ -101,7 +101,22 @@ class GameController:
         # 修炼相关
         self.xiu_lian_no_finish_icon = cv2.imread(xiu_lian_path)
         self.xiu_lian_no_finish_icon = cv2.cvtColor(self.xiu_lian_no_finish_icon,cv2.COLOR_BGR2GRAY)    
-
+        # 驱魔相关
+        self.qu_mo_small_icon = cv2.imread(qu_mo_small_path)
+        self.qu_mo_small_icon = cv2.cvtColor(self.qu_mo_small_icon,cv2.COLOR_BGR2GRAY)  
+        self.qu_mo_icon = cv2.imread(qu_mo_icon_path)
+        self.qu_mo_icon = cv2.cvtColor(self.qu_mo_icon,cv2.COLOR_BGR2GRAY)                  
+        # 背包
+        self.bag_icon = cv2.imread(bag_icon_path)
+        self.bag_icon = cv2.cvtColor(self.bag_icon,cv2.COLOR_BGR2GRAY)               
+        # f9
+        self.f9_icon = cv2.imread(f9_icon_path)
+        self.f9_icon = cv2.cvtColor(self.f9_icon,cv2.COLOR_BGR2GRAY)  
+        # 修炼对话
+        self.xiu_lian_talk_icon = cv2.imread(xiu_lian_talk_path)
+        self.xiu_lian_talk_icon = cv2.cvtColor(self.xiu_lian_talk_icon,cv2.COLOR_BGR2GRAY)  
+        self.xiu_lian_task_icon = cv2.imread(xiu_lian_task_path)
+        self.xiu_lian_task_icon = cv2.cvtColor(self.xiu_lian_task_icon,cv2.COLOR_BGR2GRAY)  
 
     def get_hwnd(self,hwnd, extra):
         status = DefaultMunch.fromDict(
@@ -400,6 +415,34 @@ class GameController:
         else:
             return True
 
+    def is_open_bag(self,frame):
+        match = find_best_match(frame,self.bag_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+        if match is None:
+            return False
+        else:
+            return True
+
+    def is_open_f9(self,frame):
+        match = find_best_match(frame,self.f9_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+        if match is None:
+            return False
+        else:
+            return True
+
+    def is_open_xiu_lian_talk(self,frame):
+        match = find_best_match(frame,self.xiu_lian_talk_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+        if match is None:
+            return False
+        else:
+            return True
+
+    def has_xiu_lian_task(self,frame):
+        match = find_best_match(frame,self.xiu_lian_task_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+        if match is None:
+            return False
+        else:
+            return True
+
     def has_xiu_ye_task(self,frame,return_match=False):
         match = find_best_match(frame,self.has_xiu_ye_task_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
         if match is None:
@@ -433,6 +476,7 @@ class GameController:
 
                 set_current_top(hwnd)
                 human_delay(0.2)
+                pyautogui.press('f9')
                 
                 # 检查页面是否有修业任务
                 left, top, right, bottom = get_client_rect(hwnd)
@@ -457,6 +501,17 @@ class GameController:
 
                 xiu_ye_abs_x,xiu_ye_abs_y = get_abs_x_y_cv(match_result["bbox"],left, top)
                 human_delay(0.2)
+
+                while True:
+                    shot = self.cv.grab(region)
+                    frame = np.array(shot)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                    if self.is_open_f9(frame):
+                        break
+                    human_delay(0.1)
+                    pyautogui.press('f9')
+                    human_delay(0.1)
+
                 # 物资
                 if task_type == 1:
                     self.mouse.click_on([xiu_ye_abs_x,xiu_ye_abs_y])
@@ -509,7 +564,6 @@ class GameController:
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                                
                         if not self.is_has_talk(frame):
                             break
-                        print("检测到对话框,摁下esc")
                         pyautogui.press('esc')
 
                 # 宠物
@@ -597,7 +651,39 @@ class GameController:
                     
                 else:
                     print("❌ 未知任务类型")
-    
+
+    # 检测是否在驱魔状态,如果没有,使用驱魔香
+    def check_qu_mo(self):
+        for hwnd in self.hwnd_list:
+            set_current_top(hwnd)
+            human_delay(0.1)
+
+            left, top, right, bottom = get_client_rect(hwnd)
+
+            region = make_mss_region(hwnd,ROI)
+            shot = self.cv.grab(region)
+            frame = np.array(shot)
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+            match = find_best_match(frame,self.qu_mo_small_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+            if match is None:
+                print("当前不在驱魔状态,使用驱魔香")
+                while True:
+                    open_bag_keyboard()
+                    human_delay(0.1)
+                    shot = self.cv.grab(region)
+                    frame = np.array(shot)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+
+                    if self.is_open_bag(frame):
+                        break
+
+                match = find_best_match(frame,self.qu_mo_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+                abs_x,abs_y = get_abs_x_y_cv(match["bbox"],left, top)
+                right_click(self.mouse,[abs_x, abs_y])
+                human_delay(0.1)
+                open_bag_keyboard()
+                self.mouse.move_to([right, bottom]) 
+
     def run_xiu_lian(self):
         while True:
             if all(v.is_finish_xiu_lian for v in self.hwnd_status.values()):
@@ -606,13 +692,9 @@ class GameController:
             for hwnd in self.hwnd_list:
                 if self.hwnd_status[hwnd].is_finish_xiu_lian:
                     continue
+                set_current_top(hwnd)
+                human_delay(0.1)
 
-                # 打开日历
-                while True:
-                    open_calendar()
-                    if self.is_open_ri_cheng(hwnd):
-                        break
-                    human_delay(1)
 
                 # 点击修炼按钮,开始自动寻路 
                 left, top, right, bottom = get_client_rect(hwnd)
@@ -621,14 +703,114 @@ class GameController:
                 shot = self.cv.grab(region)
                 frame = np.array(shot)
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
-                match = find_best_match(frame,self.xiu_lian_no_finish_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
-                xiu_lian_abs_x,xiu_lian_abs_y = get_abs_x_y_cv(match["bbox"],left, top)
-                
-                while True:
-                    self.mouse.click_on([xiu_lian_abs_x, xiu_lian_abs_y]) 
-                    human_delay(0.1)
+
+                # 判断有没有修炼任务,如果没有,就认为没开始接任务,就从日历开始寻路
+                if not self.has_xiu_lian_task(frame):
+                    while True:
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                        if self.is_open_f9(frame):
+                            break
+                        human_delay(0.2)
+                        pyautogui.press('f9')
+
+                    # 打开日历
+                    while True:
+                        human_delay(0.2)
+
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                    
+                        if self.is_open_ri_cheng(frame):
+                            break
+                        open_calendar()
+                        human_delay(1)
+
                     shot = self.cv.grab(region)
                     frame = np.array(shot)
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)    
-                    if not self.is_has_xun_lu(frame):
-                        break                
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                    match = find_best_match(frame,self.xiu_lian_no_finish_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+                    xiu_lian_abs_x,xiu_lian_abs_y = get_abs_x_y_cv(match["bbox"],left, top)
+                    self.mouse.click_on([xiu_lian_abs_x, xiu_lian_abs_y]) 
+
+                    pyautogui.press('esc')
+                    human_delay(0.1)         
+
+                    while True:
+                        shot = self.cv.grab(region)
+                        frame = np.array(shot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)    
+
+                        match = find_best_match(frame,self.xiu_lian_talk_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+                        if match is not None:
+                            break
+                        human_delay(2)
+                    xiu_lian_talk_abs_x,xiu_lian_talk_abs_y = get_abs_x_y_cv(match["bbox"],left, top)
+                    self.mouse.click_on([xiu_lian_talk_abs_x, xiu_lian_talk_abs_y]) 
+                    pyautogui.press('esc')
+            
+            shot = self.cv.grab(region)
+            frame = np.array(shot)
+            color_result = get_color(frame,'blue')
+            if not color_result:
+                print("❌ 未找到蓝色图标")
+                return
+
+            xiu_lian_task_abs_x,xiu_lian_task_abs_y = get_abs_x_y_cv(color_result,left, top)
+            self.mouse.click_on([xiu_lian_task_abs_x, xiu_lian_task_abs_y]) 
+                
+            while True:
+                shot = self.cv.grab(region)
+                frame = np.array(shot)
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                if self.is_open_item_shop(frame):
+                    item_buy_button_match = find_best_match(frame,self.item_shop_buy_button_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+                    break
+                human_delay(0.5)
+
+            # 确保出现"需要"的标志
+            while True:
+                human_delay(1)
+                shot = self.cv.grab(region)
+                frame = np.array(shot)
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                if self.is_has_item_xu_qiu(frame):
+                    break
+                human_delay(1)
+
+            # 确保购买成功
+            while True:
+                abs_x,abs_y = get_abs_x_y_cv(item_buy_button_match["bbox"],left, top)
+                self.mouse.click_on([abs_x, abs_y])
+                human_delay(1)
+                shot = self.cv.grab(region)
+                frame = np.array(shot)
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                if not self.is_open_item_shop(frame):
+                    break
+                
+            shot = self.cv.grab(region)
+            frame = np.array(shot)
+            color_result = get_color(frame,'blue')
+            xiu_lian_task_abs_x,xiu_lian_task_abs_y = get_abs_x_y_cv(color_result,left, top)
+            
+            # 确保开始自动寻路
+            while True:
+                self.mouse.click_on([xiu_lian_task_abs_x, xiu_lian_task_abs_y])
+                human_delay(0.1)
+                shot = self.cv.grab(region)
+                frame = np.array(shot)
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)    
+                if not self.is_has_xun_lu(frame):
+                    break
+
+            # 确保关闭了对话
+            while True:
+                human_delay(1)
+                shot = self.cv.grab(region)
+                frame = np.array(shot)
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                                
+                if not self.is_has_talk(frame):
+                    break
+                pyautogui.press('esc')

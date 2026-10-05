@@ -11,5 +11,5 @@ if __name__ == '__main__':
     #         time.sleep(game_controller.human_delay(5, sigma=0.15))
     #     except Exception as e:
     #         print(e)
-
-    game_controller.run_xiu_ye()
+    game_controller.check_qu_mo()
+    game_controller.run_xiu_lian()

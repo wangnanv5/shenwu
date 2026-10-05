@@ -394,6 +394,7 @@ def get_color(frame,color=None):
     # 先闭运算：连接相近的文字像素
     kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5))
     mask_closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close)
+    cv2.imwrite("blue_icon.png", mask_closed)
 
     # 再开运算：去除细小噪点
     kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
@@ -407,13 +408,8 @@ def get_color(frame,color=None):
 
     for cnt in contours:
         x, y, cw, ch = cv2.boundingRect(cnt)
-        area = cw * ch    
-        aspect_ratio = cw / max(ch, 1)
-
-        if area > 500 and aspect_ratio > 1.5:
-            task_found = True
-            return x,y,cw,ch
+        task_found = True
+        return x + x1,y+ y1,cw,ch
 
     if not task_found:
-        print("❌ 未检测到修业任务")   
         return None     

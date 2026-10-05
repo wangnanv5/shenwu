@@ -49,7 +49,9 @@ xiu_ye_chong_wu_path = image_dir / "XiuYe" / "task_chong_wu.png"
 xiu_ye_tiao_zhan_path = image_dir / "XiuYe" / "task_tiao_zhan.png"
 
 # 修炼相关
-xiu_lian_path = image_dir / "XiuLian" / "xiu_lian_no_finish.png"
+xiu_lian_no_finish_path = image_dir / "XiuLian" / "xiu_lian_no_finish.png"
+xiu_lian_finish_path = image_dir / "XiuLian" / "xiu_lian_finish.png"
 xiu_lian_talk_path = image_dir / "XiuLian" / "xiu_lian_talk.png"
 # 修炼任务
+xiu_lian_task_path = image_dir / "XiuLian" / "xiu_lian_task.png"
 xiu_lian_task_path = image_dir / "XiuLian" / "xiu_lian_task.png"

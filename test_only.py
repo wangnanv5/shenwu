@@ -27,7 +27,7 @@ except Exception:
 # =========================
 
 # 你的小图标路径
-ICON_PATH = r"C:\Users\27321\shenwu\resource\Common\ri_cheng.png"
+ICON_PATH = r"C:\Users\27321\shenwu\resource\XiuLian\xiu_lian_finish.png"
 
 # 匹配阈值，0.75~0.9 之间调
 THRESHOLD = 0.85
@@ -254,9 +254,9 @@ def main():
 
             frame = np.array(shot)
             frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             icon = cv2.cvtColor(icon, cv2.COLOR_BGRA2BGR)
-            icon = cv2.cvtColor(icon, cv2.COLOR_BGR2GRAY)
+            # icon = cv2.cvtColor(icon, cv2.COLOR_BGR2GRAY)
             # 在这个区域里做模板匹配
             match = find_best_match(
                 frame,

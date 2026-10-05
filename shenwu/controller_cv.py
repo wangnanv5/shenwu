@@ -99,8 +99,15 @@ class GameController:
         self.xiu_ye_tiao_zhan_icon = cv2.imread(xiu_ye_tiao_zhan_path)
         self.xiu_ye_tiao_zhan_icon = cv2.cvtColor(self.xiu_ye_tiao_zhan_icon,cv2.COLOR_BGR2GRAY)          
         # 修炼相关
-        self.xiu_lian_no_finish_icon = cv2.imread(xiu_lian_path)
+        self.xiu_lian_no_finish_icon = cv2.imread(xiu_lian_no_finish_path)
         self.xiu_lian_no_finish_icon = cv2.cvtColor(self.xiu_lian_no_finish_icon,cv2.COLOR_BGR2GRAY)    
+        self.xiu_lian_finish_icon = cv2.imread(xiu_lian_finish_path)
+        # self.xiu_lian_finish_icon = cv2.cvtColor(self.xiu_lian_finish_icon,cv2.COLOR_BGR2GRAY)            
+        # 修炼对话
+        self.xiu_lian_talk_icon = cv2.imread(xiu_lian_talk_path)
+        self.xiu_lian_talk_icon = cv2.cvtColor(self.xiu_lian_talk_icon,cv2.COLOR_BGR2GRAY)  
+        self.xiu_lian_task_icon = cv2.imread(xiu_lian_task_path)
+        self.xiu_lian_task_icon = cv2.cvtColor(self.xiu_lian_task_icon,cv2.COLOR_BGR2GRAY)  
         # 驱魔相关
         self.qu_mo_small_icon = cv2.imread(qu_mo_small_path)
         self.qu_mo_small_icon = cv2.cvtColor(self.qu_mo_small_icon,cv2.COLOR_BGR2GRAY)  
@@ -112,11 +119,6 @@ class GameController:
         # f9
         self.f9_icon = cv2.imread(f9_icon_path)
         self.f9_icon = cv2.cvtColor(self.f9_icon,cv2.COLOR_BGR2GRAY)  
-        # 修炼对话
-        self.xiu_lian_talk_icon = cv2.imread(xiu_lian_talk_path)
-        self.xiu_lian_talk_icon = cv2.cvtColor(self.xiu_lian_talk_icon,cv2.COLOR_BGR2GRAY)  
-        self.xiu_lian_task_icon = cv2.imread(xiu_lian_task_path)
-        self.xiu_lian_task_icon = cv2.cvtColor(self.xiu_lian_task_icon,cv2.COLOR_BGR2GRAY)  
 
     def get_hwnd(self,hwnd, extra):
         status = DefaultMunch.fromDict(
@@ -470,13 +472,11 @@ class GameController:
                 break
 
             for hwnd in self.hwnd_list:
-
                 if self.hwnd_status[hwnd].is_finish_xiu_ye:
                     continue
 
                 set_current_top(hwnd)
                 human_delay(0.2)
-                pyautogui.press('f9')
                 
                 # 检查页面是否有修业任务
                 left, top, right, bottom = get_client_rect(hwnd)
@@ -687,6 +687,7 @@ class GameController:
     def run_xiu_lian(self):
         while True:
             if all(v.is_finish_xiu_lian for v in self.hwnd_status.values()):
+                print("所有窗口的修炼完成")
                 break
 
             for hwnd in self.hwnd_list:
@@ -695,8 +696,6 @@ class GameController:
                 set_current_top(hwnd)
                 human_delay(0.1)
 
-
-                # 点击修炼按钮,开始自动寻路 
                 left, top, right, bottom = get_client_rect(hwnd)
 
                 region = make_mss_region(hwnd,ROI)
@@ -704,16 +703,18 @@ class GameController:
                 frame = np.array(shot)
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
 
+                while True:
+                    shot = self.cv.grab(region)
+                    frame = np.array(shot)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                    if self.is_open_f9(frame):
+                        break
+                    human_delay(0.1)
+                    pyautogui.press('f9')
+                    human_delay(0.1)
+
                 # 判断有没有修炼任务,如果没有,就认为没开始接任务,就从日历开始寻路
                 if not self.has_xiu_lian_task(frame):
-                    while True:
-                        shot = self.cv.grab(region)
-                        frame = np.array(shot)
-                        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
-                        if self.is_open_f9(frame):
-                            break
-                        human_delay(0.2)
-                        pyautogui.press('f9')
 
                     # 打开日历
                     while True:
@@ -726,6 +727,16 @@ class GameController:
                             break
                         open_calendar()
                         human_delay(1)
+
+                    shot = self.cv.grab(region)
+                    frame = np.array(shot)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+
+                    match = find_best_match(frame,self.xiu_lian_finish_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+                    if match is not None:
+                        self.hwnd_status[hwnd].is_finish_xiu_lian = True
+                        print(" 当日修炼任务已完成")
+                        continue
 
                     shot = self.cv.grab(region)
                     frame = np.array(shot)
@@ -750,67 +761,71 @@ class GameController:
                     self.mouse.click_on([xiu_lian_talk_abs_x, xiu_lian_talk_abs_y]) 
                     pyautogui.press('esc')
             
-            shot = self.cv.grab(region)
-            frame = np.array(shot)
-            color_result = get_color(frame,'blue')
-            if not color_result:
-                print("❌ 未找到蓝色图标")
-                return
-
-            xiu_lian_task_abs_x,xiu_lian_task_abs_y = get_abs_x_y_cv(color_result,left, top)
-            self.mouse.click_on([xiu_lian_task_abs_x, xiu_lian_task_abs_y]) 
+                shot = self.cv.grab(region)
+                frame = np.array(shot)
+                color_result = get_color(frame,'blue')
+                if not color_result:
+                    print("❌ 未找到蓝色图标")
+                    return
                 
-            while True:
-                shot = self.cv.grab(region)
-                frame = np.array(shot)
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
-                if self.is_open_item_shop(frame):
-                    item_buy_button_match = find_best_match(frame,self.item_shop_buy_button_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
-                    break
-                human_delay(0.5)
+                xiu_lian_task_abs_x,xiu_lian_task_abs_y = get_abs_x_y_cv(color_result,left, top)
+                self.mouse.click_on([xiu_lian_task_abs_x, xiu_lian_task_abs_y]) 
+                    
+                while True:
+                    shot = self.cv.grab(region)
+                    frame = np.array(shot)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                    if self.is_open_item_shop(frame):
+                        item_buy_button_match = find_best_match(frame,self.item_shop_buy_button_icon,THRESHOLD,SCALES if USE_MULTISCALE else None)
+                        break
+                    human_delay(0.5)
 
-            # 确保出现"需要"的标志
-            while True:
-                human_delay(1)
-                shot = self.cv.grab(region)
-                frame = np.array(shot)
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
-                if self.is_has_item_xu_qiu(frame):
-                    break
-                human_delay(1)
+                # 确保出现"需要"的标志
+                while True:
+                    human_delay(1)
+                    shot = self.cv.grab(region)
+                    frame = np.array(shot)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                    if self.is_has_item_xu_qiu(frame):
+                        break
+                    human_delay(1)
 
-            # 确保购买成功
-            while True:
-                abs_x,abs_y = get_abs_x_y_cv(item_buy_button_match["bbox"],left, top)
-                self.mouse.click_on([abs_x, abs_y])
-                human_delay(1)
-                shot = self.cv.grab(region)
-                frame = np.array(shot)
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
-                if not self.is_open_item_shop(frame):
-                    break
+                # 确保购买成功
+                while True:
+                    abs_x,abs_y = get_abs_x_y_cv(item_buy_button_match["bbox"],left, top)
+                    self.mouse.click_on([abs_x, abs_y])
+                    human_delay(1)
+                    shot = self.cv.grab(region)
+                    frame = np.array(shot)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+                    if not self.is_open_item_shop(frame):
+                        break
+
+                print("✅ 修炼任务购买物品成功")
                 
-            shot = self.cv.grab(region)
-            frame = np.array(shot)
-            color_result = get_color(frame,'blue')
-            xiu_lian_task_abs_x,xiu_lian_task_abs_y = get_abs_x_y_cv(color_result,left, top)
-            
-            # 确保开始自动寻路
-            while True:
-                self.mouse.click_on([xiu_lian_task_abs_x, xiu_lian_task_abs_y])
-                human_delay(0.1)
                 shot = self.cv.grab(region)
                 frame = np.array(shot)
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)    
-                if not self.is_has_xun_lu(frame):
-                    break
+                color_result = get_color(frame,'blue')
+                xiu_lian_task_abs_x,xiu_lian_task_abs_y = get_abs_x_y_cv(color_result,left, top)
+                
+                # 确保开始自动寻路
+                while True:
+                    self.mouse.click_on([xiu_lian_task_abs_x, xiu_lian_task_abs_y])
+                    human_delay(0.1)
+                    shot = self.cv.grab(region)
+                    frame = np.array(shot)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)    
+                    if not self.is_has_xun_lu(frame):
+                        break
 
-            # 确保关闭了对话
-            while True:
-                human_delay(1)
-                shot = self.cv.grab(region)
-                frame = np.array(shot)
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                                
-                if not self.is_has_talk(frame):
-                    break
-                pyautogui.press('esc')
+                print("✅ 自动寻路结束")
+                
+                # 确保关闭了对话
+                while True:
+                    human_delay(1)
+                    shot = self.cv.grab(region)
+                    frame = np.array(shot)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)                                
+                    if not self.is_has_talk(frame):
+                        break
+                    pyautogui.press('esc')

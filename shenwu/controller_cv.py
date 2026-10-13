@@ -834,10 +834,8 @@ class GameController:
                         if not self.is_open_item_shop(frame):
                             print("✅ 修炼任务购买物品成功")
                             human_delay(0.1)
-
                             break
 
-                    
                     # 确保开始自动寻路
                     while True:
                         human_delay(0.1)
@@ -847,7 +845,6 @@ class GameController:
                         if not self.is_has_xun_lu(frame):
                             print("✅ 修炼任务自动寻路结束")
                             break
-
                     
                     # 确保关闭了对话
                     while True:

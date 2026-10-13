@@ -23,8 +23,6 @@ pet_shop_buy_button_path = image_dir / "Common" / "pet_shop_buy_button.png"
 item_shop_path = image_dir / "Common" / "item_shop.png"
 # 商店购买按钮
 item_buy_button_path = image_dir / "Common" / "item_shop_buy_button.png"
-# 商品已购买的弹窗
-item_has_buy_path = image_dir / "Common" / "item_shop_alread_buy.png"
 # 商品寄售需求的图标
 item_xu_qiu_path = image_dir / "Common" / "item_xu_qiu.png"
 # 商品寄售价格确认按钮
@@ -45,11 +43,12 @@ bag_icon_path = image_dir / "Common" / "bag.png"
 f9_icon_path = image_dir / "Common" / "f9.png"
 
 # 修业相关
-xiu_ye_path = image_dir / "XiuYe" / "xiu_ye.png"
+xiu_ye_path = image_dir / "XiuYe" / "xiu_ye_task.png"
 xiu_ye_wu_zi_path = image_dir / "XiuYe" / "task_wu_zi.png"
 xiu_ye_chong_wu_path = image_dir / "XiuYe" / "task_chong_wu.png"
 xiu_ye_tiao_zhan_path = image_dir / "XiuYe" / "task_tiao_zhan.png"
-
+xiu_ye_give_item_path = image_dir / "XiuYe" / "give_item.png"
+xiu_ye_item_que_ding_path = image_dir / "XiuYe" / "xiu_ye_item_que_ding.png"
 # 修炼相关
 xiu_lian_no_finish_path = image_dir / "XiuLian" / "xiu_lian_no_finish.png"
 xiu_lian_finish_path = image_dir / "XiuLian" / "xiu_lian_finish.png"
@@ -60,4 +59,3 @@ xiu_lian_xun_wu_path = image_dir / "XiuLian" / "xiu_lian_xun_wu.png"
 xiu_lian_zhao_ren_path = image_dir / "XiuLian" / "xiu_lian_zhao_ren.png"
 xiu_lian_feng_dao_ren_path = image_dir / "XiuLian" / "xiu_lian_dao_ren.png"
 xiu_lian_bao_hu_feng_dao_ren_path = image_dir / "XiuLian" / "bao_hu_feng_dao_ren.png"
-# xiu_lian_xun_wu_path = image_dir / "XiuLian" / "xiu_lian_task.png"

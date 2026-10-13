@@ -1,21 +1,21 @@
-# from shenwu.controller_cv import GameController
+from shenwu.controller_cv import GameController
 
-# if __name__ == '__main__':
-#     game_controller = GameController()
+if __name__ == '__main__':
+    game_controller = GameController()
 
-#     # while True:
-#     #     try:
-#     #         # run_auto_reset_round  run_xun_you run_auto_task  run_xiu_ye
-#     #         game_controller.run_auto_reset_round()
-#     #         # game_controller.run_auto_task('法宝引导')
-#     #         time.sleep(game_controller.human_delay(5, sigma=0.15))
-#     #     except Exception as e:
-#     #         print(e)
-#     game_controller.check_qu_mo()
-#     game_controller.run_xiu_lian()
+    # while True:
+    #     try:
+    #         # run_auto_reset_round  run_xun_you run_auto_task  run_xiu_ye
+    #         game_controller.run_auto_reset_round()
+    #         # game_controller.run_auto_task('法宝引导')
+    #         time.sleep(game_controller.human_delay(5, sigma=0.15))
+    #     except Exception as e:
+    #         print(e)
+    game_controller.check_qu_mo()
+    game_controller.run_xiu_lian()
 
-from humanmouse import HumanMouseController
+# from humanmouse import HumanMouseController
 
-controller = HumanMouseController()
+# controller = HumanMouseController()
 
-controller.move((100, 100), (800, 600))                       # Move
+# controller.move((100, 100), (800, 600))                       # Move

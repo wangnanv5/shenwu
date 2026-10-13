@@ -1,4 +1,3 @@
-import mss
 import pyautogui
 import win32gui
 import win32con
@@ -9,22 +8,6 @@ import math
 import numpy as np
 from PIL import ImageGrab
 from humancursor import SystemCursor
-
-cursor = SystemCursor()
-
-def get_window_rect(hwnd):
-        """
-        获取整个窗口的桌面坐标，包括标题栏和边框
-        返回: (left, top, right, bottom)
-        """
-        return win32gui.GetWindowRect(hwnd)
-
-def get_window_rect(hwnd):
-    """
-    获取整个窗口的桌面坐标，包括标题栏和边框
-    返回: (left, top, right, bottom)
-    """
-    return win32gui.GetWindowRect(hwnd)
 
 def get_client_rect(hwnd):
     """
@@ -38,10 +21,15 @@ def get_client_rect(hwnd):
     return left, top, right, bottom
 
 
-def human_delay(base_seconds: float, sigma: float = 0.3) -> float:
-    """模拟人类操作延迟，base_seconds 为中位数"""
-    return time.sleep(max(0.05, random.lognormvariate(math.log(base_seconds), sigma)))
+def rand_secs(base_seconds: float, sigma: float = 0.3) -> float:
+    """生成一条人类化的随机等待秒数，base_seconds 为中位数"""
+    return max(0.05, random.lognormvariate(math.log(base_seconds), sigma))
 
+def human_delay(base_seconds: float, sigma: float = 0.3) -> None:
+    """睡眠一段人类化的随机时间；需要拿到秒数本身时用 rand_secs"""
+    time.sleep(rand_secs(base_seconds, sigma))
+
+# 仅 legacy/ 使用
 # 根据hwnd获和尺寸取窗口的image
 def get_hwnd_image(hwnd):
     left, top, right, bottom = get_client_rect(hwnd)
@@ -55,6 +43,7 @@ def set_current_top(hwnd):
     except: 
         pass
 
+# 仅 legacy/ 使用
 def open_item_shop_keyboard():
     pyautogui.keyDown('alt')
     human_delay(0.08)    
@@ -101,6 +90,7 @@ def open_bag_keyboard():
     human_delay(0.1)  
     pyautogui.keyUp('alt')
 
+# 仅 legacy/ 使用
 def get_abs_x_y(best_bbox,left,top):
     bbox = np.array(best_bbox)
     center_x = np.mean(bbox[:, 0])
@@ -119,6 +109,7 @@ def get_abs_x_y_cv(best_bbox,left,top):
     abs_y = top + center_y
     return abs_x,abs_y
 
+# 仅 legacy/ 使用
 def check_is_frozen(
     hwnd,
     pixel_diff_thresh=25,
@@ -296,66 +287,6 @@ def find_best_match(image, templ, threshold, scales=None):
 
     return best
 
-
-def find_best_match(image, templ, threshold, scales=None):
-    """
-    在 image 中模板匹配。
-
-    返回:
-        {
-            "bbox": (x, y, w, h),
-            "score": 匹配分数,
-            "scale": 缩放比例
-        }
-
-    或 None
-    """
-    if scales is None:
-        scales = [1.0]
-
-    best = None
-
-    for scale in scales:
-        scale = float(scale)
-
-        h = int(round(templ.shape[0] * scale))
-        w = int(round(templ.shape[1] * scale))
-
-        if h <= 0 or w <= 0:
-            continue
-
-        if h > image.shape[0] or w > image.shape[1]:
-            continue
-
-        if abs(scale - 1.0) < 1e-6:
-            resized_templ = templ
-        else:
-            interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
-            resized_templ = cv2.resize(templ, (w, h), interpolation=interp)
-
-        result = cv2.matchTemplate(
-            image,
-            resized_templ,
-            cv2.TM_CCOEFF_NORMED
-        )
-
-        _, max_val, _, max_loc = cv2.minMaxLoc(result)
-
-        if max_val >= threshold:
-            if best is None or max_val > best["score"]:
-                best = {
-                    "bbox": (
-                        int(max_loc[0]),
-                        int(max_loc[1]),
-                        w,
-                        h
-                    ),
-                    "score": float(max_val),
-                    "scale": scale
-                }
-
-    return best
-
 def right_click(cursor,target_point):
     cursor.move_to(target_point)
     human_delay( 0.1)
@@ -414,6 +345,8 @@ def get_color(frame,color=None):
         mask_red1 = cv2.inRange(hsv, lower_red1, upper_red1)
         mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
         mask  = cv2.bitwise_or(mask_red1, mask_red2)  # 两段合并
+    else:
+        raise ValueError(f"不支持的颜色: {color}")
 
     mask = keep_largest_component(mask)
 
@@ -429,12 +362,78 @@ def get_color(frame,color=None):
         mask_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
 
-    task_found = False
+    if not contours:
+        return None
+
+    x, y, cw, ch = cv2.boundingRect(contours[0])
+    return x + x1, y + y1, cw, ch
+
+# 获取提交任务的物品格子坐标
+def generate_grid_mask(img, template_path=None):
+    h, w = img.shape[:2]
+
+    # 2. 获取 40 个格子的矩形坐标 (x1, y1, x2, y2)
+    if template_path:
+        # 【方式 A：模板匹配动态定位】适合窗口位置可能发生移动的情况
+        template = cv2.imread(template_path)
+        res = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+        
+        anchor_x, anchor_y = max_loc
+        # 根据“给予物品”按钮左上角的相对偏移量（根据截图分辨率微调）
+        x1 = anchor_x - 32
+        y1 = anchor_y + 35
+        x2 = x1 + 203   # 40格区域整体宽度
+        y2 = y1 + 324   # 40格区域整体高度
+    else:
+        # 【方式 B：直接基于原图比例/坐标切片】适合固定分辨率截图
+        # 下述比例匹配你提供的游戏截图分辨率
+        x1 = int(w * 0.478)
+        y1 = int(h * 0.191)
+        x2 = int(w * 0.783)
+        y2 = int(h * 0.830)
+
+    mask = np.zeros((h, w), dtype=np.uint8)
+    mask[y1:y2, x1:x2] = 255
+    masked_img = cv2.bitwise_and(img, img, mask=mask)
+
+    # 3. 将遮罩后的图像转为 HSV 格式进行色彩和亮度提取
+    hsv = cv2.cvtColor(masked_img, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(hsv)
+
+    # 4. 提取高亮区域的条件
+    # - 高亮：由于未置灰，原本的高光和浅色能够达到 V > 210
+    # - 饱和度：S > 70（过滤掉 F3、数字等黄白/单色噪点）
+    _, thresh_v = cv2.threshold(v, 150, 255, cv2.THRESH_BINARY)
+    _, thresh_s = cv2.threshold(s, 0, 255, cv2.THRESH_BINARY)
+    high_light_mask = cv2.bitwise_and(thresh_v, thresh_s)
+
+    # 5. 形态学膨胀 (Dilation) 使碎片高光连成整体的道具块
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (11, 11))
+    processed_mask = cv2.dilate(high_light_mask, kernel, iterations=1)
+
+    # 6. 查找轮廓，定位所有高亮物品
+    contours, _ = cv2.findContours(processed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    detected_targets = []
 
     for cnt in contours:
-        x, y, cw, ch = cv2.boundingRect(cnt)
-        task_found = True
-        return x + x1,y+ y1,cw,ch
+        area = cv2.contourArea(cnt)
+        # 过滤掉过小或过大的噪点轮廓（正常一格内高亮面积为 300 ~ 2500 像素）
+        if 800 < area < 3000:
+            x, y, w, h = cv2.boundingRect(cnt)
+            
+            # 计算点击中心点
+            cx = x + w // 2
+            cy = y + h // 2
+            
+            # 保存定位数据
+            target_info = {
+                "x1": x, "y1": y, "x2": x + w, "y2": y + h,
+                "center": (cx, cy)
+            }
+            detected_targets.append(target_info)
 
-    if not task_found:
-        return None     
+    # 8. 打印坐标，并保存结果
+    print(f"检测到 {len(detected_targets)} 个高亮物品：")
+    return detected_targets

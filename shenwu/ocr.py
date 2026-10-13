@@ -15,7 +15,8 @@ class Ocr:
 
         ocr_results, _ = self.engine(img)
         if not ocr_results:
-            return []
+            # return_all=True 的调用方固定解包两个值,空结果也要保持同样的形状
+            return ([], []) if return_all else []
 
         # 只要包含 target_texts 中的任意一个，就加入结果
         found = [

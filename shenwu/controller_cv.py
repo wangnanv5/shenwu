@@ -492,8 +492,7 @@ class GameController:
             set_current_top(hwnd)
             human_delay(0.1)
 
-            # left, top, right, bottom = get_client_rect(hwnd)
-            left, top, right, bottom = get_physical_client_rect(67374)
+            left, top, right, bottom = get_physical_client_rect(hwnd)
 
             region = make_mss_region(hwnd,self.roi)
             frame = self.grab_frame(region)

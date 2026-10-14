@@ -12,6 +12,7 @@ if __name__ == '__main__':
     #     except Exception as e:
     #         print(e)
     game_controller.check_qu_mo()
+    game_controller.run_xiu_ye()
     game_controller.run_xiu_lian()
 
 # from humanmouse import HumanMouseController

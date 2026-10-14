@@ -184,7 +184,7 @@ class GameController:
         return self.find(frame, self.resource.xiu_ye_give_item_icon) is not None
 
     def _task_type(self,frame,icons):
-        """按 icons 顺序匹配任务类型，命中返回 1/2/3，全不命中返回 -1"""
+        """按 icons 顺序匹配任务类型，命中返回 1/2/3/4/5，全不命中返回 -1"""
         for index, icon in enumerate(icons, start=1):
             if self.find(frame, icon) is not None:
                 return index
@@ -193,12 +193,15 @@ class GameController:
     def get_task_type(self,frame):
         return self._task_type(frame, [self.resource.xiu_ye_wu_zi_icon,
                                        self.resource.xiu_ye_chong_wu_icon,
-                                       self.resource.xiu_ye_tiao_zhan_icon])
+                                       self.resource.xiu_ye_tiao_zhan_icon,
+                                       self.resource.xiu_ye_lie_hen_icon,
+                                       self.resource.xiu_ye_tiao_zhan_shou_xi_icon])
 
     def get_xiu_lian_task_type(self,frame):
         return self._task_type(frame, [self.resource.xiu_lian_xun_wu_icon,
                                        self.resource.xiu_lian_zhao_ren_icon,
-                                       self.resource.xiu_lian_feng_dao_ren_icon])
+                                       self.resource.xiu_lian_feng_dao_ren_icon,
+                                       ])
 
     # ---------- 业务流程 ----------
 
@@ -349,7 +352,7 @@ class GameController:
                     continue
 
                 task_type = self.get_task_type(frame)
-
+                
                 if task_type == -1:
                     print("❌ 修业任务类型错误")
                     continue
@@ -369,16 +372,22 @@ class GameController:
                         region, self.is_open_item_shop,
                         self.resource.item_shop_buy_button_icon, gap=0.5)
 
-                    # # 确保出现"需要"的标志
-                    # self.wait_until(region, self.is_has_item_xu_qiu, lead=1, gap=1)
-
-                    # 确保购买成功
-                    def click_buy():
+                    while True:
+                        print("开始购买")
                         self.click_match(item_buy_button_match, left, top)
                         human_delay(1)
+                        frame = self.grab_frame(region)
 
-                    self.wait_until(region, self.is_open_item_shop, want=False,
-                                    action=click_buy, action_first=True)
+                        # 如果弹出价格确认
+                        item_que_ren_match = self.find(frame, self.resource.item_xu_que_ren_icon)
+                        if item_que_ren_match is not None:
+                            self.click_match(item_que_ren_match, left, top, delay=0.1)
+                            human_delay(0.1)
+
+                        if not self.is_open_item_shop(frame):
+                            print("修业任务购买物品成功")
+                            human_delay(0.1)
+                            break
 
                     # 确保开始自动寻路
                     def click_task():
@@ -388,8 +397,9 @@ class GameController:
                     self.wait_until(region, self.is_has_xun_lu, want=False,
                                     action=click_task, action_first=True)
 
-                    human_delay(1)
-                    frame = self.grab_frame(region)
+                    frame = self.grab_frame(region, "raw")
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
+
                     while self.give_item(frame):
                         print("给予物品")
                         item_location = generate_grid_mask(frame)
@@ -430,7 +440,7 @@ class GameController:
                     self.close_talk(region, lead=1, gap=1)
 
                 # 战斗
-                elif task_type == 3:
+                elif (task_type == 3 or task_type == 5):
                     auto_reset_round()
 
                     # 确保进入战斗中
@@ -447,6 +457,27 @@ class GameController:
                     human_delay(0.2)
 
                     self.close_talk(region, lead=0.2, gap=0.2)
+                    
+                elif task_type == 4:
+                    print("开始修业裂隙任务")
+                    auto_reset_round()
+
+                    def click_task_and_wait():
+                        self.mouse.click_on([xiu_ye_abs_x, xiu_ye_abs_y])
+                        human_delay(3)
+
+                    # 第一次封印,封印结束出现对话框
+                    self.wait_until(region, self.is_has_talk,
+                                    action=click_task_and_wait, action_first=True)
+                    self.close_talk(region, lead=0.2, gap=0.2)
+                    auto_reset_round()
+
+                    # 取第二段封印
+                    self.mouse.click_on([xiu_ye_abs_x, xiu_ye_abs_y])
+
+                    self.wait_until(region, self.is_in_fight, want=False, lead=2)
+                    self.close_talk(region, lead=0.2, gap=0.2)
+
                     
                 else:
                     print("❌ 未知任务类型")
@@ -513,7 +544,7 @@ class GameController:
 
                     frame = self.grab_frame(region, "bgr")
                     match = self.find(frame, self.resource.xiu_lian_finish_icon)
-                    if match is not None:
+                    if match is None:
                         self.hwnd_status[hwnd].is_finish_xiu_lian = True
                         print(" 当日修炼任务已完成")
                         continue
@@ -536,7 +567,6 @@ class GameController:
                     return
                 
                 xiu_lian_task_abs_x,xiu_lian_task_abs_y = get_abs_x_y_cv(color_result,left, top)
-
                 if task_type == 1:
                     print("开始修练寻物任务")
                     self.mouse.click_on([xiu_lian_task_abs_x, xiu_lian_task_abs_y]) 
@@ -545,9 +575,6 @@ class GameController:
                     item_buy_button_match = self.wait_shop_buy_button(
                         region, self.is_open_item_shop,
                         self.resource.item_shop_buy_button_icon, gap=0.5)
-
-                    # # 确保出现"需要"的标志
-                    # self.wait_until(region, self.is_has_item_xu_qiu, lead=1, gap=1)
 
                     # 确保购买成功
                     while True:
@@ -567,9 +594,22 @@ class GameController:
                             human_delay(0.1)
                             break
 
-                    # 确保开始自动寻路
                     self.wait_until(region, self.is_has_xun_lu, want=False, lead=0.1)
                     print("✅ 修炼任务自动寻路结束")
+                    human_delay(1)
+
+                    frame = self.grab_frame(region, "raw")
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
+                    human_delay(1)
+                    while self.give_item(frame):
+                        print("给予物品")
+                        item_location = generate_grid_mask(frame)
+                        for item in item_location:
+                            center = item["center"]
+                            self.mouse.click_on([center[0]+left,center[1]+top])
+                            human_delay(0.1)
+                        item_que_ding_match = self.find(frame,self.resource.xiu_ye_item_que_ding_icon)                        
+                        self.click_match(item_que_ding_match, left, top,delay=0.1)
 
                     # 确保关闭了对话
                     self.close_talk(region, lead=1)
@@ -598,12 +638,13 @@ class GameController:
                     # 确保开始自动寻路
                     self.wait_until(region, self.is_has_xun_lu, want=False, lead=0.1)
                     print("✅ 修炼任务自动寻路结束")
+                    human_delay(3)
 
-                    # 确保出现"保护疯道人"的对话框
-                    frame = self.wait_until(region, self.is_bao_hu_feng_dao_ren, lead=1, gap=5)
-                    feng_dao_ren_match = self.find(frame, self.resource.xiu_lian_bao_hu_feng_dao_ren_icon)
-                    self.click_match(feng_dao_ren_match, left, top, delay=0.1)
-                    human_delay(0.1)
+                    # # 确保出现"保护疯道人"的对话框
+                    # frame = self.wait_until(region, self.is_bao_hu_feng_dao_ren, lead=1, gap=5)
+                    # feng_dao_ren_match = self.find(frame, self.resource.xiu_lian_bao_hu_feng_dao_ren_icon)
+                    # self.click_match(feng_dao_ren_match, left, top, delay=0.1)
+                    # human_delay(0.1)
 
                     self.wait_until(region, self.is_in_fight, want=False, lead=2)
                     print("✅ 修炼任务结束战斗")

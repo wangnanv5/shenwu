@@ -47,6 +47,8 @@ xiu_ye_path = image_dir / "XiuYe" / "xiu_ye_task.png"
 xiu_ye_wu_zi_path = image_dir / "XiuYe" / "task_wu_zi.png"
 xiu_ye_chong_wu_path = image_dir / "XiuYe" / "task_chong_wu.png"
 xiu_ye_tiao_zhan_path = image_dir / "XiuYe" / "task_tiao_zhan.png"
+xiu_ye_tiao_zhan_shou_xi_path = image_dir / "XiuYe" / "xiu_ye_tiao_zhan_shou_xi.png"
+xiu_ye_lie_hen_path = image_dir / "XiuYe" / "xiu_ye_lie_hen.png"
 xiu_ye_give_item_path = image_dir / "XiuYe" / "give_item.png"
 xiu_ye_item_que_ding_path = image_dir / "XiuYe" / "xiu_ye_item_que_ding.png"
 # 修炼相关

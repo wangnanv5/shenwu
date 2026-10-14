@@ -27,7 +27,7 @@ except Exception:
 # =========================
 
 # 你的小图标路径
-ICON_PATH = r"C:\Users\27321\shenwu\resource\Common\close_talk.png"
+ICON_PATH = r"C:\Users\27321\Desktop\shenwu\resource\XiuYe\give_item.png"
 
 # 匹配阈值，0.75~0.9 之间调
 THRESHOLD = 0.85

@@ -404,7 +404,7 @@ def generate_grid_mask(img, template_path=None):
     # 4. 提取高亮区域的条件
     # - 高亮：由于未置灰，原本的高光和浅色能够达到 V > 210
     # - 饱和度：S > 70（过滤掉 F3、数字等黄白/单色噪点）
-    _, thresh_v = cv2.threshold(v, 150, 255, cv2.THRESH_BINARY)
+    _, thresh_v = cv2.threshold(v, 140, 255, cv2.THRESH_BINARY)
     _, thresh_s = cv2.threshold(s, 0, 255, cv2.THRESH_BINARY)
     high_light_mask = cv2.bitwise_and(thresh_v, thresh_s)
 

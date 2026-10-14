@@ -49,8 +49,10 @@ class GameResource:
         self.xiu_ye_wu_zi_icon = self._load_gray(xiu_ye_wu_zi_path)
         self.xiu_ye_chong_wu_icon = self._load_gray(xiu_ye_chong_wu_path)
         self.xiu_ye_tiao_zhan_icon = self._load_gray(xiu_ye_tiao_zhan_path)
-        self.xiu_ye_give_item_icon = self._load_gray(xiu_ye_give_item_path)
-        self.xiu_ye_item_que_ding_icon = self._load_gray(xiu_ye_item_que_ding_path)
+        self.xiu_ye_tiao_zhan_shou_xi_icon = self._load_gray(xiu_ye_tiao_zhan_shou_xi_path)
+        self.xiu_ye_lie_hen_icon = self._load_gray(xiu_ye_lie_hen_path)
+        self.xiu_ye_give_item_icon = self._load_rgb(xiu_ye_give_item_path)
+        self.xiu_ye_item_que_ding_icon = self._load_rgb(xiu_ye_item_que_ding_path)
 
         # 修炼相关
         self.xiu_lian_no_finish_icon = self._load_gray(xiu_lian_no_finish_path)
@@ -70,6 +72,10 @@ class GameResource:
         if icon is None:
             raise FileNotFoundError(f"无法读取图标资源: {path}")
         return icon
+
+    @classmethod
+    def _load_rgb(cls, path):
+        return cv2.cvtColor(cls._load(path), cv2.COLOR_BGR2RGB)
 
     @classmethod
     def _load_gray(cls, path):

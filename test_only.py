@@ -27,14 +27,14 @@ except Exception:
 # =========================
 
 # 你的小图标路径
-ICON_PATH = r"C:\Users\27321\Desktop\3.png"
+ICON_PATH = r"C:\Users\27321\Desktop\shenwu\resource\XiuYe\xiu_ye_tiao_zhan_shou_xi.png"
 
 # 匹配阈值，0.75~0.9 之间调
 THRESHOLD = 0.70
 
 # 是否开启多尺度匹配
 # 如果图标可能因为窗口大小、DPI 缩放而变大变小，可以改成 True
-USE_MULTISCALE = True
+USE_MULTISCALE = False
 
 # 如果 USE_MULTISCALE = True，会使用这些缩放比例尝试匹配
 SCALES = [14/12]

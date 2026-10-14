@@ -55,12 +55,12 @@ class GameResource:
         self.xiu_ye_give_item_icon = self._load_rgb(xiu_ye_give_item_path)
         self.xiu_ye_item_que_ding_icon = self._load_rgb(xiu_ye_item_que_ding_path)
         # 修业完成图标在彩色帧上匹配,保持原图
-        self.xiu_ye_finish_icon = self._load(xiu_ye_finish_path)
+        self.xiu_ye_finish_icon = self._load_rgb(xiu_ye_finish_path)
 
         # 修炼相关
         self.xiu_lian_no_finish_icon = self._load_gray(xiu_lian_no_finish_path)
         # 修炼完成图标在彩色帧上匹配,保持原图
-        self.xiu_lian_finish_icon = self._load(xiu_lian_finish_path)
+        self.xiu_lian_finish_icon = self._load_rgb(xiu_lian_finish_path)
         # 修炼对话
         self.xiu_lian_talk_icon = self._load_gray(xiu_lian_talk_path)
         self.xiu_lian_task_icon = self._load_gray(xiu_lian_task_path)

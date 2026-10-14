@@ -6,7 +6,7 @@ from shenwu.controller_cv import GameController
 if __name__ == '__main__':
 
     game_controller = GameController()
-    # game_controller.check_qu_mo()
-    # game_controller.run_xiu_ye()
-    # game_controller.run_xiu_lian()
-    game_controller.test_resources()
+    game_controller.check_qu_mo()
+    game_controller.run_xiu_ye()
+    game_controller.run_xiu_lian()
+    # game_controller.test_resources()

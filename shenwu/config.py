@@ -16,17 +16,17 @@ you_yu_path = image_dir / "Fish" / "you_yu.png"
 # 判断是否在战斗中
 is_in_fight_path = image_dir / "Common" / "is_in_fight.png"
 # 宠物商店
-pet_shop_path = image_dir / "Common" / "pet_shop.png"
+pet_shop_path = image_dir / "Common" / "PetShop" / "pet_shop.png"
 # 宠物商店的购买按钮
-pet_shop_buy_button_path = image_dir / "Common" / "pet_shop_buy_button.png"
+pet_shop_buy_button_path = image_dir / "Common" / "PetShop" / "pet_shop_buy_button.png"
 # 商店
-item_shop_path = image_dir / "Common" / "item_shop.png"
+item_shop_path = image_dir / "Common" / "ItemShop" / "item_shop.png"
 # 商店购买按钮
-item_buy_button_path = image_dir / "Common" / "item_shop_buy_button.png"
+item_buy_button_path = image_dir / "Common" / "ItemShop" / "item_shop_buy_button.png"
 # 商品寄售需求的图标
-item_xu_qiu_path = image_dir / "Common" / "item_xu_qiu.png"
+item_xu_qiu_path = image_dir / "Common" / "ItemShop" / "item_xu_qiu.png"
 # 商品寄售价格确认按钮
-item_que_ren_path = image_dir / "Common" / "item_shop_que_ren.png"
+item_que_ren_path = image_dir / "Common" / "ItemShop" / "item_shop_que_ren.png"
 # 关闭npc对话框的关闭按钮
 close_talk_path = image_dir / "Common" / "close_talk.png"
 # 自动寻路的图标
@@ -41,6 +41,11 @@ qu_mo_icon_path = image_dir / "Common" / "qu_mo.png"
 bag_icon_path = image_dir / "Common" / "bag.png"
 # F9
 f9_icon_path = image_dir / "Common" / "f9.png"
+
+# 除魔相关
+chu_mo_finish_icon_path = image_dir / "ChuMo" / "chu_mo_finished.png"
+
+# 封妖相关
 
 # 修业相关
 xiu_ye_path = image_dir / "XiuYe" / "xiu_ye_task.png"

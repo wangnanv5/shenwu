@@ -1,13 +1,36 @@
-import pyautogui
+import ctypes
 import win32gui
 import win32con
+from ctypes import wintypes
+user32 = ctypes.windll.user32
+
+# 显式声明 64 位指针参数类型，防止 64 位 Python 发生整型截断
+user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+user32.SetProcessDpiAwarenessContext.restype = wintypes.BOOL
+
+user32.GetWindowDpiAwarenessContext.argtypes = [wintypes.HWND]
+user32.GetWindowDpiAwarenessContext.restype = ctypes.c_void_p
+
+user32.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+
+class POINT(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+user32.LogicalToPhysicalPointForPerMonitorDPI.argtypes = [
+    wintypes.HWND,
+    ctypes.POINTER(POINT),
+]
+user32.LogicalToPhysicalPointForPerMonitorDPI.restype = wintypes.BOOL
+
 import time
 import cv2
+import pyautogui
 import random
 import math
 import numpy as np
 from PIL import ImageGrab
-from humancursor import SystemCursor
 
 def get_client_rect(hwnd):
     """
@@ -108,6 +131,44 @@ def get_abs_x_y_cv(best_bbox,left,top):
     abs_x = left + center_x
     abs_y = top + center_y
     return abs_x,abs_y
+
+def get_physical_client_rect(hwnd):
+    """获取窗口客户区在屏幕上的真实物理像素坐标（免疫任何第三方库的 DPI 覆盖）"""
+    # 1. 获取目标游戏窗口自身的 DPI 上下文（例如游戏所处的 150% 逻辑模式）
+    hwnd_dpi_ctx = user32.GetWindowDpiAwarenessContext(hwnd)
+
+    # 2. 将当前 Python 线程临时对齐到与游戏窗口完全一致的 DPI 坐标系
+    old_ctx = user32.SetThreadDpiAwarenessContext(hwnd_dpi_ctx)
+    try:
+        # 此时 GetClientRect 和 ClientToScreen 严格处于同一逻辑坐标系 (1200 x 900)
+        _, _, client_w, client_h = win32gui.GetClientRect(hwnd)
+
+        left_log, top_log = win32gui.ClientToScreen(hwnd, (0, 0))
+        right_log, bottom_log = win32gui.ClientToScreen(
+            hwnd, (client_w, client_h)
+        )
+
+        # 强制从游戏窗口的逻辑坐标转换为 4K 屏幕的真实物理像素坐标 (1600 x 1200)
+        pt_top_left = POINT(left_log, top_log)
+        pt_bottom_right = POINT(right_log, bottom_log)
+
+        user32.LogicalToPhysicalPointForPerMonitorDPI(
+            hwnd, ctypes.byref(pt_top_left)
+        )
+        user32.LogicalToPhysicalPointForPerMonitorDPI(
+            hwnd, ctypes.byref(pt_bottom_right)
+        )
+
+        return (
+            pt_top_left.x,
+            pt_top_left.y,
+            pt_bottom_right.x,
+            pt_bottom_right.y,
+        )
+    finally:
+        # 3. 立即恢复 Python 线程原本的 DPI 模式，确保后续 mss 截图与鼠标点击不受影响
+        if old_ctx:
+            user32.SetThreadDpiAwarenessContext(old_ctx)
 
 # 仅 legacy/ 使用
 def check_is_frozen(
@@ -228,7 +289,7 @@ def make_mss_region(hwnd, roi=None):
 
     return region
 
-def find_best_match(image, templ, threshold, scales=None):
+def find_best_match(image, templ, threshold, scale=None):
     """
     在 image 中模板匹配。
 
@@ -241,49 +302,48 @@ def find_best_match(image, templ, threshold, scales=None):
 
     或 None
     """
-    if scales is None:
-        scales = [1.0]
+    if scale is None:
+        scale = [1.0]
 
     best = None
 
-    for scale in scales:
-        scale = float(scale)
+    scale = float(scale)
 
-        h = int(round(templ.shape[0] * scale))
-        w = int(round(templ.shape[1] * scale))
+    h = int(round(templ.shape[0] * scale))
+    w = int(round(templ.shape[1] * scale))
 
-        if h <= 0 or w <= 0:
-            continue
+    if h <= 0 or w <= 0:
+        return None
 
-        if h > image.shape[0] or w > image.shape[1]:
-            continue
+    if h > image.shape[0] or w > image.shape[1]:
+        return None
 
-        if abs(scale - 1.0) < 1e-6:
-            resized_templ = templ
-        else:
-            interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
-            resized_templ = cv2.resize(templ, (w, h), interpolation=interp)
+    if abs(scale - 1.0) < 1e-6:
+        resized_templ = templ
+    else:
+        interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+        resized_templ = cv2.resize(templ, (w, h), interpolation=interp)
 
-        result = cv2.matchTemplate(
-            image,
-            resized_templ,
-            cv2.TM_CCOEFF_NORMED
-        )
+    result = cv2.matchTemplate(
+        image,
+        resized_templ,
+        cv2.TM_CCOEFF_NORMED
+    )
 
-        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+    _, max_val, _, max_loc = cv2.minMaxLoc(result)
 
-        if max_val >= threshold:
-            if best is None or max_val > best["score"]:
-                best = {
-                    "bbox": (
-                        int(max_loc[0]),
-                        int(max_loc[1]),
-                        w,
-                        h
-                    ),
-                    "score": float(max_val),
-                    "scale": scale
-                }
+    if max_val >= threshold:
+        if best is None or max_val > best["score"]:
+            best = {
+                "bbox": (
+                    int(max_loc[0]),
+                    int(max_loc[1]),
+                    w,
+                    h
+                ),
+                "score": float(max_val),
+                "scale": scale
+            }
 
     return best
 

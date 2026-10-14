@@ -14,10 +14,7 @@ from shenwu.config import *
 from shenwu.resource import GameResource
 from shenwu.utils import (human_delay,rand_secs,set_current_top,right_click,get_color,
                           auto_reset_round,open_calendar,get_client_rect,open_bag_keyboard,
-                          make_mss_region,find_best_match,get_abs_x_y_cv,generate_grid_mask)
-
-import ctypes
-ctypes.windll.shcore.SetProcessDpiAwareness(2)
+                          make_mss_region,find_best_match,get_abs_x_y_cv,generate_grid_mask,get_physical_client_rect)
 
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.2
@@ -25,17 +22,12 @@ pyautogui.PAUSE = 0.2
 ROI = (0, 0, 800, 600)
 
 # 匹配阈值，0.75~0.9 之间调
-THRESHOLD = 0.80
-USE_MULTISCALE = False
-
-# 如果 USE_MULTISCALE = True，会使用这些缩放比例尝试匹配
-SCALES = [1.5]
+THRESHOLD = 0.65
 
 fish_width_start = 380
 fish_width_end = 440
 fish_height_start = 100
 fish_height_end = 180
-
 
 def press_f9():
     human_delay(0.1)
@@ -55,6 +47,18 @@ class GameController:
         self.mouse = SystemCursor()
         self.resource = GameResource()
 
+        self.set_radio(self.hwnd_list[0])
+
+    def set_radio(self,hwnd):
+
+        left, top, right, bottom = get_physical_client_rect(hwnd)
+        window_height = bottom - top
+        radio = window_height / ROI[3]
+        self.roi = (0, 0, int(right * radio), int(bottom * radio))
+        self.radio = radio
+        
+        print(f"缩放比例: {radio}")
+    
     @functools.cached_property
     def ocr(self):
         # RapidOCR 构造时要加载 ONNX 模型，放在 __init__ 会拖慢所有命令
@@ -92,7 +96,7 @@ class GameController:
 
     def find(self, frame, icon):
         """模板匹配，固定使用模块级 THRESHOLD / USE_MULTISCALE / SCALES"""
-        return find_best_match(frame, icon, THRESHOLD, SCALES if USE_MULTISCALE else None)
+        return find_best_match(frame, icon, THRESHOLD, self.radio)
 
     def wait_until(self, region, predicate, want=True, action=None,
                    action_first=False, lead=0.0, gap=0.0, mode="gray"):
@@ -230,7 +234,7 @@ class GameController:
                     human_delay(1)
                     left, top, right, bottom = get_client_rect(hwnd)
 
-                    region = make_mss_region(hwnd,ROI)
+                    region = make_mss_region(hwnd,self.roi)
 
                     # 点击对话框，进入战斗
                     frame = self.grab_frame(region)
@@ -341,7 +345,7 @@ class GameController:
                 # 检查页面是否有修业任务
                 left, top, right, bottom = get_client_rect(hwnd)
 
-                region = make_mss_region(hwnd,ROI)
+                region = make_mss_region(hwnd,self.roi)
                 frame = self.grab_frame(region)
                 match_result = self.find_xiu_ye_task(frame)
 
@@ -488,9 +492,10 @@ class GameController:
             set_current_top(hwnd)
             human_delay(0.1)
 
-            left, top, right, bottom = get_client_rect(hwnd)
+            # left, top, right, bottom = get_client_rect(hwnd)
+            left, top, right, bottom = get_physical_client_rect(67374)
 
-            region = make_mss_region(hwnd,ROI)
+            region = make_mss_region(hwnd,self.roi)
             frame = self.grab_frame(region)
             match = self.find(frame, self.resource.qu_mo_small_icon)
 
@@ -525,7 +530,7 @@ class GameController:
 
                 left, top, right, bottom = get_client_rect(hwnd)
 
-                region = make_mss_region(hwnd,ROI)
+                region = make_mss_region(hwnd,self.roi)
                 frame = self.grab_frame(region)
                 task_type = self.get_xiu_lian_task_type(frame)
 

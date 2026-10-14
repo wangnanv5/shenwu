@@ -27,7 +27,7 @@ except Exception:
 # =========================
 
 # 你的小图标路径
-ICON_PATH = r"C:\Users\27321\Desktop\shenwu\resource\XiuYe\xiu_ye_tiao_zhan_shou_xi.png"
+ICON_PATH = r"C:\Users\27321\Desktop\shenwu\resource\Common\close_talk.png"
 
 # 匹配阈值，0.75~0.9 之间调
 THRESHOLD = 0.70
@@ -53,7 +53,6 @@ ROI = None
 # =========================
 
 hwnd_list = []
-
 
 def get_hwnd(hwnd, extra):
     title = win32gui.GetWindowText(hwnd)

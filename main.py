@@ -60,6 +60,20 @@ def check_qu_mo():
     click.echo("开始检查驱魔状态")
     get_controller().check_qu_mo()
 
+# python main.py test-resources
+@cli.command()
+def test_resources():
+    click.echo("开始检测 resource 图标")
+    get_controller().test_resources()
+
+# python main.py test-get-color --color blue
+@cli.command()
+@click.option('--color', type=click.Choice(['blue', 'yellow', 'red']),
+              default='blue', help='要可视化的颜色，默认 blue')
+def test_get_color(color):
+    click.echo(f"开始可视化 get_color({color}) 的检测结果")
+    get_controller().test_get_color(color)
+
 # python main.py run-fish
 @cli.command()
 def run_fish():

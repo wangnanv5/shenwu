@@ -17,7 +17,6 @@ user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
 class POINT(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
-
 user32.LogicalToPhysicalPointForPerMonitorDPI.argtypes = [
     wintypes.HWND,
     ctypes.POINTER(POINT),
@@ -42,7 +41,6 @@ def get_client_rect(hwnd):
     right = left + rect[2]
     bottom = top + rect[3]
     return left, top, right, bottom
-
 
 def rand_secs(base_seconds: float, sigma: float = 0.3) -> float:
     """生成一条人类化的随机等待秒数，base_seconds 为中位数"""
@@ -121,7 +119,6 @@ def get_abs_x_y(best_bbox,left,top):
     abs_x = left + center_x
     abs_y = top + center_y
     return abs_x,abs_y
-
 
 def get_abs_x_y_cv(best_bbox,left,top):
     x, y, w, h = best_bbox
@@ -376,7 +373,7 @@ def keep_largest_component(mask: np.ndarray) -> np.ndarray:
 
     return result
 
-def get_color(frame,color=None):
+def get_color(frame,color=None,radio=1):
     game_image_array = np.array(frame)
     h,w = game_image_array.shape[:2]
 

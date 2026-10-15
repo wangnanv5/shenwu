@@ -510,7 +510,7 @@ class GameController:
                     self.wait_until(region, self.is_in_fight, want=False, lead=2)
                     human_delay(0.2)
 
-                    self.close_talk(region, lead=0.2, gap=0.2)
+                    self.close_talk(region, lead=1, gap=1)
                     
                 elif task_type == XiuYeTaskType.LIE_HEN:
                     auto_reset_round()
@@ -528,7 +528,7 @@ class GameController:
                     self.wait_until(region, self.is_in_fight, want=False, lead=2)
                     human_delay(0.2)
                     
-                    self.close_talk(region, lead=0.2, gap=0.2)
+                    self.close_talk(region, lead=1, gap=1)
                     # auto_reset_round()
 
                     # # 取第二段封印
@@ -707,7 +707,7 @@ class GameController:
                     self.wait_until(region, self.is_in_fight, want=False, lead=2)
                     print("修炼任务结束战斗")
 
-                    self.close_talk(region, lead=0.2, gap=0.2)
+                    self.close_talk(region, lead=1, gap=1)
                     print("修炼任务关闭对话框成功")
                     self.hwnd_status[hwnd].is_finish_xiu_lian = True
 

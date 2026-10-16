@@ -74,7 +74,6 @@ def get_client_rect(hwnd):
 
     return left, top, right, bottom
 
-
 def human_delay(base_seconds: float, sigma: float = 0.3) -> float:
     return max(0.05, random.lognormvariate(math.log(base_seconds), sigma))
 

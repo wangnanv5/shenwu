@@ -1,0 +1,3 @@
+WinMain lpCmdLine= nCmdShow=10 iEngineKey=0 bIsLowWinVer=0
+engine grey key = 0
+not started from zm

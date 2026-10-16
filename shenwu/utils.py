@@ -25,6 +25,7 @@ user32.LogicalToPhysicalPointForPerMonitorDPI.restype = wintypes.BOOL
 
 import time
 import cv2
+import subprocess
 import pyautogui
 import random
 import math
@@ -424,6 +425,35 @@ def get_color(frame,color=None,radio=1):
 
     x, y, cw, ch = cv2.boundingRect(contours[0])
     return x + x1, y + y1, cw, ch
+
+def launch_game():
+    count = 1
+    hwnd_list = []
+    
+    EXE_PATH = r"C:\zmapps\幻唐志\htzmain.exe"
+
+    def get_hwnd(hwnd, extra):
+        title = win32gui.GetWindowText(hwnd)
+        if ("幻唐志" in title) and ("RENDER" not in title) and ("zmapps" not in title) :
+            if hwnd in hwnd_list:
+                return
+            hwnd_list.append(hwnd)
+
+    while True:
+        win32gui.EnumWindows(get_hwnd, None)
+        print(f"找到{len(hwnd_list)}个游戏窗口")
+
+        if len(hwnd_list) == count:
+            for hwnd in hwnd_list:
+                set_current_top(hwnd)
+            break
+        try:
+            proc = subprocess.run([EXE_PATH])
+            time.sleep(5)
+        except FileNotFoundError:
+            print(f"[ERROR] 找不到 exe，请检查路径是否正确：\n{EXE_PATH}")
+        except Exception as e:
+            print(f"[ERROR] 启动失败：{e}")
 
 # 获取提交任务的物品格子坐标
 def generate_grid_mask(img, template_path=None):

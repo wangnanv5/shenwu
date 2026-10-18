@@ -41,6 +41,8 @@ qu_mo_icon_path = image_dir / "Common" / "qu_mo.png"
 bag_icon_path = image_dir / "Common" / "bag.png"
 # F9
 f9_icon_path = image_dir / "Common" / "f9.png"
+# 交易中心
+jiao_yi_zhong_xin_path = image_dir / "Common" / "jiao_yi_zhong_xin.png"
 
 # 除魔相关
 chu_mo_finish_icon_path = image_dir / "ChuMo" / "chu_mo_finished.png"

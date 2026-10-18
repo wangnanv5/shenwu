@@ -42,6 +42,7 @@ class GameResource:
         self.bag_icon = self._load_gray(bag_icon_path)
         # f9
         self.f9_icon = self._load_gray(f9_icon_path)
+        self.jiao_yi_zhong_xin_icon = self._load_gray(jiao_yi_zhong_xin_path)
 
         # 修业任务类型,分为捕捉宠物 查找物资 挑战
         self.has_xiu_ye_task_icon = self._load_gray(xiu_ye_path)

@@ -491,7 +491,7 @@ def get_color(frame,color=None,radio=1):
     return x + x1, y + y1, cw, ch
 
 # 获取提交任务的物品格子坐标
-def generate_grid_mask(img, template_path=None):
+def generate_grid_mask(img,radio, template_path=None):
     h, w = img.shape[:2]
 
     # 2. 获取 40 个格子的矩形坐标 (x1, y1, x2, y2)
@@ -510,9 +510,9 @@ def generate_grid_mask(img, template_path=None):
     else:
         # 【方式 B：直接基于原图比例/坐标切片】适合固定分辨率截图
         # 下述比例匹配你提供的游戏截图分辨率
-        x1 = int(w * 0.478)
+        x1 = int(w * 0.48)
         y1 = int(h * 0.191)
-        x2 = int(w * 0.783)
+        x2 = int(w * 0.778)
         y2 = int(h * 0.830)
 
     mask = np.zeros((h, w), dtype=np.uint8)
@@ -542,7 +542,7 @@ def generate_grid_mask(img, template_path=None):
     for cnt in contours:
         area = cv2.contourArea(cnt)
         # 过滤掉过小或过大的噪点轮廓（正常一格内高亮面积为 300 ~ 2500 像素）
-        if 800 < area < 3000:
+        if 300*radio < area < 3000*radio:
             x, y, w, h = cv2.boundingRect(cnt)
             
             # 计算点击中心点

@@ -370,6 +370,9 @@ class GameController:
     def find_xiu_ye_task(self,frame):
         return self.find(frame, self.resource.has_xiu_ye_task_icon)
 
+    def find_xiu_lian_task(self,frame):
+        return self.find(frame, self.resource.xiu_lian_talk_icon)
+
     def give_item(self,frame):
         return self.find(frame, self.resource.xiu_ye_give_item_icon) is not None
 
@@ -665,7 +668,7 @@ class GameController:
 
                             if self.give_item(frame):
                                 print("给予物品")
-                                item_location = generate_grid_mask(frame)
+                                item_location = generate_grid_mask(frame,self.radio)
                                 for item in item_location:
                                     center = item["center"]
                                     self.mouse.click_on([center[0]+left,center[1]+top])
@@ -827,6 +830,11 @@ class GameController:
 
                     region = make_mss_region(hwnd,self.roi)
                     frame = self.wait_until(region, self.is_open_f9, action=press_f9)
+
+                    match_result = self.find_xiu_lian_task(frame)
+                    # 这个是修炼任务完成后,定位修炼任务的坐标,然后再点击,因为直接用xiu_lian_task_abs_x的话,未完成和完成之后的任务栏的尺寸不一样
+                    xiu_lian_abs_x,xiu_lian_abs_y = get_abs_x_y_cv(match_result["bbox"],left, top)
+
                     # 判断有没有修炼任务,如果没有,就认为没开始接任务,就从日历开始寻路
                     if not self.has_xiu_lian_task(frame):
 
@@ -904,11 +912,11 @@ class GameController:
                             frame = self.grab_frame(region, "raw")
                             frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
                             frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
-                            self.mouse.click_on([xiu_lian_task_abs_x, xiu_lian_task_abs_y]) 
+                            self.mouse.click_on([xiu_lian_abs_x, xiu_lian_abs_y]) 
 
                             if self.give_item(frame):
                                 print("给予物品")
-                                item_location = generate_grid_mask(frame)
+                                item_location = generate_grid_mask(frame,self.radio)
                                 for item in item_location:
                                     center = item["center"]
                                     self.mouse.click_on([center[0]+left,center[1]+top])

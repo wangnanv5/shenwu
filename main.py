@@ -1,25 +1,34 @@
-try:
+import sys
+
+import click
+
+def set_dpi_awareness():
+    """把进程声明为 Per-Monitor DPI Aware，脚本才能按屏幕绝对像素操作。
+
+    必须在导入 controller_cv 之前调用：pyautogui 导入时会把进程设成
+    SYSTEM_DPI_AWARE(1)，晚于它设置就会失败，坐标精度反而更差。
+    """
     import ctypes
     try:
         # Per-Monitor DPI Aware
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except Exception:
-        ctypes.windll.user32.SetProcessDPIAware()
-except Exception:
-    pass
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
 
-import functools
-import click
+# gui 命令走另一套：Qt6 创建 QApplication 时会把进程设成 PER_MONITOR_AWARE_V2
+# （比上面的 v1 更完整），而一个进程只允许设置一次，抢先设置会让 Qt 失败并打印
+# 「SetProcessDpiAwarenessContext() failed: 拒绝访问」。
+# 所以启动 GUI 时既不设置 DPI，也不导入下面两个模块 —— 它们会连带导入 pyautogui，
+# 而 pyautogui 导入时就会把进程设成 SYSTEM_DPI_AWARE(1)，同样会抢在 Qt 前面。
+_IS_GUI = len(sys.argv) > 1 and sys.argv[1] == "gui"
 
-from shenwu.controller_cv import GameController
-from shenwu.utils import human_delay
-
-
-@functools.lru_cache(maxsize=1)
-def get_controller():
-    """懒加载：__init__ 会枚举窗口并加载图标，放到导入期会导致 --help 也必须开游戏"""
-    return GameController()
-
+if not _IS_GUI:
+    set_dpi_awareness()
+    from shenwu.controller_cv import get_controller  # noqa: E402
+    from shenwu.utils import human_delay  # noqa: E402
 
 @click.group()
 def cli():
@@ -60,20 +69,6 @@ def check_qu_mo():
     click.echo("开始检查驱魔状态")
     get_controller().check_qu_mo()
 
-# python main.py test-resources
-@cli.command()
-def test_resources():
-    click.echo("开始检测 resource 图标")
-    get_controller().test_resources()
-
-# python main.py test-get-color --color blue
-@cli.command()
-@click.option('--color', type=click.Choice(['blue', 'yellow', 'red']),
-              default='blue', help='要可视化的颜色，默认 blue')
-def test_get_color(color):
-    click.echo(f"开始可视化 get_color({color}) 的检测结果")
-    get_controller().test_get_color(color)
-
 # python main.py run-fish
 @cli.command()
 def run_fish():
@@ -86,6 +81,13 @@ def run_fish():
 def run_auto_task(task_name):
     click.echo(f"开始运行任务 {task_name} 的脚本")
     get_controller().run_auto_task(task_name)
+
+# python main.py gui
+@cli.command()
+def gui():
+    """启动 PyQt 图形界面"""
+    from shenwu.gui import run_gui
+    run_gui()
 
 if __name__ == "__main__":
     cli()

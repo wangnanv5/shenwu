@@ -19,6 +19,7 @@ dependencies = [
     "opencv-python>=5.0.0.93",
     "pillow>=12.3.0",
     "pyautogui>=0.9.54",
+    "pyqt6>=6.11.0",
     "pyscreeze>=1.0.1",
     "pywin32>=312",
     "rapidocr-onnxruntime>=1.4.4",

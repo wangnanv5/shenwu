@@ -24,6 +24,7 @@ user32.LogicalToPhysicalPointForPerMonitorDPI.argtypes = [
 user32.LogicalToPhysicalPointForPerMonitorDPI.restype = wintypes.BOOL
 
 import time
+import threading
 import cv2
 import subprocess
 import pyautogui
@@ -31,6 +32,53 @@ import random
 import math
 import numpy as np
 from PIL import ImageGrab
+from humancursor.utilities.human_curve_generator import HumanizeMouseTrajectory
+
+# ---------- humancursor 边界缺陷修复 ----------
+# generate_random_curve_parameters 会在点击坐标落在 pyautogui.size() 的 15%~85%
+# 区间外时（多开窗口铺到副屏 / 负坐标区很常见）把 offset_boundary_x/y 强制置 0；
+# 此时若鼠标已在目标点（重复点击同一任务点是常态），range(l, r) 为空，库内回退成
+# np.random.choice(l_boundary, ...)——窗口在负坐标区时 l_boundary <= 0，直接抛
+# ValueError: a must be greater than 0 ...。这里用等价但安全的实现替换它：
+# 空范围以左边界撑开 1 像素，保证采样区间永远非空，a 参数不再参与回退。
+def _safe_generate_internal_knots(self, l_boundary, r_boundary,
+                                  d_boundary, u_boundary, knots_count):
+    if not isinstance(knots_count, int) or knots_count < 0:
+        knots_count = 0
+    l_boundary, r_boundary = int(l_boundary), int(r_boundary)
+    d_boundary, u_boundary = int(d_boundary), int(u_boundary)
+    if r_boundary <= l_boundary:
+        r_boundary = l_boundary + 1
+    if u_boundary <= d_boundary:
+        u_boundary = d_boundary + 1
+    knots_x = np.random.choice(range(l_boundary, r_boundary), size=knots_count)
+    knots_y = np.random.choice(range(d_boundary, u_boundary), size=knots_count)
+    return list(zip(knots_x, knots_y))
+
+
+HumanizeMouseTrajectory.generate_internal_knots = _safe_generate_internal_knots
+
+# ---------- 「终止」信号（GUI 的停止按钮用） ----------
+# 置位后 human_delay 会在下一片睡眠（最多 0.1s）内抛 TaskTerminated，把当前任务
+# 从任意调用深度立即打断；命令行从不置位，行为与原来完全一致。
+terminate_event = threading.Event()
+
+
+class TaskTerminated(BaseException):
+    """用户请求立即终止。
+
+    继承 BaseException 而不是 Exception，是为了绕过业务代码里
+    「except Exception」的逐窗口兜底，把终止信号一路传回任务线程。
+    """
+
+
+def request_terminate():
+    terminate_event.set()
+
+
+def clear_terminate():
+    terminate_event.clear()
+
 
 def get_client_rect(hwnd):
     """
@@ -48,8 +96,19 @@ def rand_secs(base_seconds: float, sigma: float = 0.3) -> float:
     return max(0.05, random.lognormvariate(math.log(base_seconds), sigma))
 
 def human_delay(base_seconds: float, sigma: float = 0.3) -> None:
-    """睡眠一段人类化的随机时间；需要拿到秒数本身时用 rand_secs"""
-    time.sleep(rand_secs(base_seconds, sigma))
+    """睡眠一段人类化的随机时间；需要拿到秒数本身时用 rand_secs。
+
+    睡眠按最多 0.1s 一片切分，每片之间检查终止信号 —— 收到「终止」立即抛
+    TaskTerminated，让 wait_until / 业务循环当场退出，而不是睡完这一觉。
+    """
+    deadline = time.monotonic() + rand_secs(base_seconds, sigma)
+    while True:
+        if terminate_event.is_set():
+            raise TaskTerminated("用户请求终止")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(0.1, remaining))
 
 # 仅 legacy/ 使用
 # 根据hwnd获和尺寸取窗口的image
@@ -111,6 +170,11 @@ def open_bag_keyboard():
     pyautogui.keyUp('e')
     human_delay(0.1)  
     pyautogui.keyUp('alt')
+
+def press_f9():
+    human_delay(0.1)
+    pyautogui.press('f9')
+    human_delay(0.1)
 
 # 仅 legacy/ 使用
 def get_abs_x_y(best_bbox,left,top):
@@ -425,35 +489,6 @@ def get_color(frame,color=None,radio=1):
 
     x, y, cw, ch = cv2.boundingRect(contours[0])
     return x + x1, y + y1, cw, ch
-
-def launch_game():
-    count = 1
-    hwnd_list = []
-    
-    EXE_PATH = r"C:\zmapps\幻唐志\htzmain.exe"
-
-    def get_hwnd(hwnd, extra):
-        title = win32gui.GetWindowText(hwnd)
-        if ("幻唐志" in title) and ("RENDER" not in title) and ("zmapps" not in title) :
-            if hwnd in hwnd_list:
-                return
-            hwnd_list.append(hwnd)
-
-    while True:
-        win32gui.EnumWindows(get_hwnd, None)
-        print(f"找到{len(hwnd_list)}个游戏窗口")
-
-        if len(hwnd_list) == count:
-            for hwnd in hwnd_list:
-                set_current_top(hwnd)
-            break
-        try:
-            proc = subprocess.run([EXE_PATH])
-            time.sleep(5)
-        except FileNotFoundError:
-            print(f"[ERROR] 找不到 exe，请检查路径是否正确：\n{EXE_PATH}")
-        except Exception as e:
-            print(f"[ERROR] 启动失败：{e}")
 
 # 获取提交任务的物品格子坐标
 def generate_grid_mask(img, template_path=None):

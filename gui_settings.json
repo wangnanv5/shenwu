@@ -1,0 +1,57 @@
+{
+  "queues": {
+    "修业-修炼": [],
+    "修业": [
+      {
+        "key": "qu_mo",
+        "params": {}
+      },
+      {
+        "key": "xiu_ye",
+        "params": {}
+      }
+    ]
+  },
+  "bindings": {
+    "三生万物": "修业"
+  },
+  "active_queue": "修业",
+  "show_dev_tools": false,
+  "params": {
+    "auto_reset_round": {
+      "is_hide": false
+    },
+    "auto_task": {
+      "task_name": "法宝引导"
+    },
+    "test_resources": {
+      "icon_name": "bag_icon",
+      "threshold": 0.7
+    },
+    "test_get_color": {
+      "color": "blue"
+    }
+  },
+  "ocr_history": [],
+  "selected_servers": [
+    "三生万物",
+    "三生万物",
+    "三生万物"
+  ],
+  "auto_scroll": true,
+  "auto_refresh": true,
+  "loop": {
+    "times": 1,
+    "interval": 30,
+    "continue_on_error": false
+  },
+  "schedule": {
+    "enabled": false,
+    "time": "12:00"
+  },
+  "diagnostic": {
+    "threshold": 70,
+    "icon_name": "bag_icon",
+    "color": "blue"
+  }
+}

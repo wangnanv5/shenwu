@@ -10,7 +10,7 @@ Windows 桌面游戏自动化脚本，针对游戏《幻唐志》。通过 OpenC
 
 - Windows 11，Python 3.12，依赖用 uv 管理（`uv.lock`、`.venv`）
 - 必须在**游戏窗口已打开**的情况下运行：`GameController.__init__` 会枚举窗口并 `assert`，找不到窗口直接失败。`GameController` 通过 `get_controller()`（`lru_cache` 懒加载）获取，命令体内才构造，所以 `--help` 不需要先开游戏窗口
-- 程序启动时设置了 `SetProcessDpiAwareness(2)`，坐标一律按屏幕绝对像素处理
+- 命令行启动时设置了 `SetProcessDpiAwareness(2)`，坐标一律按屏幕绝对像素处理；**GUI 例外** —— 一个进程只允许设置一次 DPI 感知，而 `pyautogui` 导入时会把它设成 `SYSTEM_DPI_AWARE(1)`，两者都会抢在 Qt 前面，导致 Qt 打印「SetProcessDpiAwarenessContext() failed: 拒绝访问」。因此 `main.py` 在 `gui` 命令下既不设置 DPI 也不导入 `controller_cv` / `utils`，GUI 里的 `controller_cv` 导入全部延后到 `QApplication` 创建之后，由 Qt 自己设成 `PER_MONITOR_AWARE_V2`（实测 radio / roi 与命令行模式完全一致）
 
 ## 常用命令
 
@@ -22,7 +22,10 @@ uv run python main.py run-auto-reset-round   # 自动重置回合
 uv run python main.py check-qu-mo            # 检查驱魔状态
 uv run python main.py run-fish               # 钓鱼
 uv run python main.py run-auto-task 法宝引导  # OCR 找任务并点击
-uv run python main.py test-resources         # 诊断：实时可视化所有图标匹配情况
+uv run python main.py gui                    # 启动 PyQt 图形界面（推荐）
+# 界面流程：执行队列面板选/建队列 → 任务卡片「加入队列」 → 窗口列表多选 hwnd「绑定队列」 → 「执行」
+# Ctrl+Alt+Q 紧急停止；标题栏「开发/测试」开关显示诊断功能
+uv run python main.py gui                    # 诊断功能在 GUI 的「开发/测试」开关里
 uv run python main.py test-get-color --color blue  # 诊断：实时可视化 get_color 检测
 ```
 
@@ -38,6 +41,8 @@ uv run python main.py test-get-color --color blue  # 诊断：实时可视化 ge
 | `shenwu/config.py` | 图标文件路径（`resource/` 下的 PNG） |
 | `shenwu/utils.py` | 窗口/截图/模板匹配/键盘/颜色检测等底层工具 |
 | `shenwu/ocr.py` | `Ocr`，RapidOCR 封装，`get_ocr_from_image(img, target_texts)` 按目标文本过滤 |
+| `shenwu/gui/` | PyQt6 界面：`main_window.py`(队列面板/卡片/窗口表/托盘) / `workers.py`(QThread，按计划逐窗口执行) / `theme.py`(QSS) / `settings.py`(json 配置) / `app_icon.py`(Pillow 现画的应用图标) |
+| `shenwu/windows_utils.py` | `Win32BorderWithLabel`：给指定 hwnd 画彩色边框 + 文字标签（需外部循环调 `update_position()` 泵消息）；另有 `enumerate_windows()` / `get_render_color()` |
 | `legacy/` | 旧版 OCR 实现 `controller.py` 和几个临时脚本，**只读参考，不再维护** |
 
 `resource/` 按业务分子目录：`Common`、`XiuLian`、`XiuYe`、`XunYou`、`Fish`（另有 `ChuMo`、`FengYao` 备用）。
@@ -53,6 +58,24 @@ uv run python main.py test-get-color --color blue  # 诊断：实时可视化 ge
 - `close_talk(region, lead, gap)` / `wait_shop_buy_button(...)` / `click_match(match, left, top, delay)` —— 基于 `wait_until` 的组合
 
 **`action_first` 是语义性的，别随手改**：开背包、点购买、点击进入战斗属于「目标状态还不存在，必须先操作一次」，用 `True`；f9、alt+y(日历) 是**开关键**，用默认的 `False`，否则第一轮就会把已打开的面板关掉。
+
+**游戏窗口识别**：只认标题严格匹配 `幻唐志 - <服务器名>` 的窗口（`GAME_TITLE_PATTERN` / `parse_game_title`，服务器名动态、可多开）。三重排除：`RENDER` 渲染窗口、壳窗口类名（`CabinetWClass` 等，打开名为「幻唐志」的文件夹时标题会是「幻唐志 - 文件资源管理器」，格式完全一样）、以及**本进程的窗口**（GUI 自身，靠标题排除不可靠，用 `GetWindowThreadProcessId` 比对 pid）。`refresh_hwnds()` 会重建列表并剔除已关闭/标题不再匹配的窗口（保留原完成状态），`window_infos()` 给 GUI 提供 `(序号, hwnd, 标题, 服务器名)`。
+
+**GUI 执行模型（队列 -> 绑定 -> 执行）**：任务卡片没有单独启停，只负责「编辑参数 + 加入队列」。队列在「执行队列」面板定义（可多个、可增删任务/排序），持久化在 `gui_settings.json` 的 `queues`（`{队列名: [{key, params}, ...]}`）；窗口绑定持久化为 `bindings`（`{服务器名: 队列名}`，用服务器名做键是因为 hwnd 每次启动都变，运行时由 `_rebind_from_settings` 解析回 hwnd）。执行时 `_build_plan_items()` 生成 `[(hwnd, 队列名, tasks), ...]`（hwnd 升序），`TaskWorker` 逐窗口 `set_selected_hwnds([hwnd])` 后按该窗口绑定的队列顺序跑，结束恢复 `set_selected_hwnds([])`；三个 `all(...)` 完成判断只看 `hwnd_list`。开发/测试类卡片（`TaskSpec.dev_only`）默认隐藏，标题栏「开发/测试」开关控制。窗口列表按 hwnd 升序、颜色由 `windows_utils.assign_colors` 唯一分配；每个绑定窗口挂一个 `Win32BorderWithLabel`（Qt 定时器泵 `update_position()`）。
+
+日志「自动滚动」勾选时插入后置 `scroll_bar.setValue(maximum())`（`ensureCursorVisible` 只保证光标可见，末尾空行时不会真正贴底）；未勾选时记录插入前的 `scroll_bar.value()`，插完还原，保证用户当前位置不动 —— 不能先 `moveCursor(End)` 再插入，它会把视口一起滚到底。
+
+⚠️ `Win32BorderWithLabel` 的窗口类名必须是**每实例唯一**（`..._{id(self)}`）：pywin32 的 `WNDCLASS` 注册后绑定的是那一个 `wnd_proc`，共用类名会让所有覆盖层的消息都派发到第一个实例（内容画错 + `WM_DESTROY` 重复 `DeleteObject` 报错）。
+
+**立即终止**：`utils.terminate_event` 是全局终止信号；`human_delay` 按 ≤0.1s 分片睡眠并在每片检查，置位后立刻抛 `TaskTerminated`（继承 **BaseException**，专门绕过业务里 `except Exception` 的逐窗口兜底）。GUI 的 `TaskWorker.request_stop()` 同时置 worker 标志与该信号；worker `run()` 开头 `clear_terminate()`，外层 `except TaskTerminated` 打印后经 `finally` 恢复运行目标并 `done`。命令行从不置位，行为不变。代价：终止会把任务留在中间状态（背包可能没关等），这是「立即终止」的固有语义。
+
+**humancursor 边界补丁**：`generate_random_curve_parameters` 在点击坐标落在 `pyautogui.size()` 的 15%~85% 区间外（多开铺到副屏/负坐标区）时会把 `offset_boundary_x/y` 置 0；此时若鼠标已在目标点，`range(l, r)` 为空，库内回退 `np.random.choice(l_boundary)`，负坐标下抛 `ValueError: a must be greater than 0`。`utils.py` 里用 `_safe_generate_internal_knots` 替换了 `HumanizeMouseTrajectory.generate_internal_knots`：空范围以左边界撑开 1 像素，采样区间恒非空。改 humancursor 行为只能改这里，不要去动 site-packages。
+
+**单窗口容错**：巡游 / 修业 / 修炼的每个窗口处理都包了 try/except，出错只记 `window_fail_counts`，连续失败 `MAX_WINDOW_FAILS`(3) 次才标记该窗口完成并跳过，任务结束汇总失败窗口；`check_qu_mo` / `run_auto_task` 同样逐窗口容错。这样坏窗口不会拖死整个任务，也不会因为一次抖动就放弃。`reset_finish_status()` 会顺带清空失败计数，`controller.current_hwnd` 记录正在处理哪个窗口（GUI 用它把边框文字改成 `▶ 当前任务`）。
+
+**GUI 配置持久化**：`shenwu/gui/settings.py` 用 json 存项目根的 `gui_settings.json`（队列顺序、各任务参数、轮次/间隔/出错继续、定时、日志开关、上次选中的服务器名、OCR 任务名历史、诊断阈值）。窗口列表按**服务器名**恢复多选，避免 hwnd 每次都变。
+
+**GUI 停止机制**：循环类方法（`run_xun_you` / `run_xiu_ye` / `run_xiu_lian` / `run_fish` / `run_auto_reset_round` / `test_*`）都接受可选 `stop_event`（`threading.Event`），不传时行为与命令行完全一致；GUI 用它在下一次循环检查点中断。重复执行同一任务前先调 `reset_finish_status()` 清空 `is_finish_*` 标记，否则第二次会直接跳过。`get_controller()` 的 `lru_cache` 单例已移到 `controller_cv.py`，main.py 与 GUI 共用。
 
 **任务类型用 Enum + 顺序匹配**：`XiuYeTaskType` / `XiuLianTaskType` 定义在 `controller_cv.py`，`_task_type(frame, icons, task_enum)` 按 icons 列表顺序匹配，**icons 顺序必须和 `GameResource` 里图标含义对应**。修业战斗类任务（挑战/收悉/同门）走同一分支。
 
@@ -70,7 +93,7 @@ uv run python main.py test-get-color --color blue  # 诊断：实时可视化 ge
 
 ## 已知问题
 
-- `run_xiu_ye` 和 `run_xiu_lian` 的主循环没有 try/except（只有 `run_xun_you` 有），单个窗口匹配失败会中断整个循环
+- `run_auto_task` / `run_fish` 是另一套实现（PIL `ImageGrab` + OCR/模板），OCR 任务已改成遍历 `hwnd_list`，钓鱼仍只用第一个窗口
 - `get_color` 里裁剪比例（0.66/0.27 ~ 0.95/0.38）是硬编码的（虽然按帧宽高比例计算，但绑定修炼任务面板布局）；`generate_grid_mask` 的比例切片（0.478/0.191 ~ 0.783/0.830）和 800~3000 像素面积过滤同样绑定当前分辨率，换窗口尺寸要一起调
 - `utils.py` 中 `check_is_frozen` / `get_abs_x_y` / `get_hwnd_image` / `open_item_shop_keyboard` / `launch_game` 主链路已不用，只为 `legacy/` 保留
 - `run_fish` 走的是另一套识别路径（PIL `ImageGrab` + `pyautogui.locate`，不是 mss + cv2），只用第一个窗口

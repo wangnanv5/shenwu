@@ -2,15 +2,13 @@ import ctypes
 ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
 
 from shenwu.controller_cv import GameController
-from shenwu.utils import launch_game
 
 # 修炼任务 当购买的物品是去药店购买时，会卡住
 if __name__ == '__main__':
-    launch_game()
-    # game_controller = GameController()
+    game_controller = GameController()
     # game_controller.check_qu_mo()
-    # game_controller.run_xiu_ye()
-    # game_controller.run_xiu_lian()
+    game_controller.run_xiu_ye()
+    game_controller.run_xiu_lian()
     # game_controller.test_resources()
 
 # import cv2

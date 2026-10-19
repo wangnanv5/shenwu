@@ -1,6 +1,7 @@
 import functools
 import os
 import re
+import time
 from enum import Enum, auto
 
 import mss
@@ -17,8 +18,9 @@ from humancursor import SystemCursor
 
 from shenwu.config import *
 from shenwu.resource import GameResource
+from shenwu.yolo_detector import DEFAULT_ONNX_MODEL, YoloDetector
 from shenwu.utils import (human_delay,rand_secs,set_current_top,right_click,get_color,
-                          auto_reset_round,open_calendar,open_bag_keyboard,press_f9,
+                          auto_reset_round,open_calendar,open_bag_keyboard,press_f9,find_all_match,
                           make_mss_region,find_best_match,get_abs_x_y_cv,generate_grid_mask,get_physical_client_rect)
 
 pyautogui.FAILSAFE = True
@@ -35,6 +37,12 @@ fish_width_start = 380
 fish_width_end = 440
 fish_height_start = 100
 fish_height_end = 180
+
+# 宝塔检测（帧间差分找动态目标）参数，来自 legacy/test_only copy.py
+bao_ta_diff_interval = 0.12  # 差分时间窗（秒），0.10 ~ 0.15 秒动态最明显
+bao_ta_min_area = 100        # 最小运动轮廓面积（过滤噪点）
+bao_ta_max_area = 12000      # 最大运动轮廓面积（过滤大面积刷新）
+bao_ta_timeout = 30.0        # 检测超时（秒），超时未找到返回 None
 
 # 修业任务类型(与 resource 图标列表顺序一一对应)
 class XiuYeTaskType(Enum):
@@ -115,6 +123,14 @@ class GameController:
         self.mouse = SystemCursor()
         self.resource = GameResource()
 
+        # YOLO 检测器：模型文件缺失时只警告不拦截启动（self.yolo = None），
+        # 业务方法统一用 self.detect_centers(frame) 取目标中心坐标
+        # if os.path.exists(DEFAULT_ONNX_MODEL):
+        #     self.yolo = YoloDetector(DEFAULT_ONNX_MODEL)
+        # else:
+        #     self.yolo = None
+        #     print(f"❌ 未找到 YOLO 模型 {DEFAULT_ONNX_MODEL}，YOLO 检测不可用")
+
     def set_radio(self,hwnd):
         set_current_top(hwnd)
         left, top, right, bottom = get_physical_client_rect(hwnd)
@@ -130,6 +146,16 @@ class GameController:
         # RapidOCR 构造时要加载 ONNX 模型，放在 __init__ 会拖慢所有命令
         from shenwu.ocr import Ocr
         return Ocr()
+
+    def detect_centers(self, frame):
+        """YOLO 检测帧内目标，返回中心坐标 [(cx, cy), ...]（帧内像素坐标）。
+
+        frame 传 BGR 3 通道帧（grab_frame(region, "bgr")），别传默认的灰度帧；
+        模型未加载时返回 []。需要完整检测框时直接用 self.yolo.detect(frame)。
+        """
+        if self.yolo is None:
+            return []
+        return self.yolo.detect_centers(frame)
 
     def get_hwnd(self,hwnd, extra):
         """EnumWindows 回调：把新出现的游戏窗口加进 hwnd_list"""
@@ -273,6 +299,11 @@ class GameController:
         return find_best_match(frame, icon, THRESHOLD if threshold is None else threshold,
                                self.radio)
 
+    def find_all(self, frame, icon, threshold=None):
+        """模板匹配，返回所有匹配结果。"""
+        return find_all_match(frame, icon, THRESHOLD if threshold is None else threshold,
+                              self.radio)
+
     def wait_until(self, region, predicate, want=True, action=None,
                    action_first=False, lead=1, gap=1, mode="gray"):
         """轮询截图直到 predicate(frame) == want，返回命中的那一帧。
@@ -371,7 +402,17 @@ class GameController:
         return self.find(frame, self.resource.has_xiu_ye_task_icon)
 
     def find_xiu_lian_task(self,frame):
-        return self.find(frame, self.resource.xiu_lian_talk_icon)
+        return self.find(frame, self.resource.xiu_lian_task_icon)
+
+    def find_jiao_yi_zhong_xin(self,frame):
+        """交易中心可能有多张模板，逐个匹配取分数最高的一次；模板列表为空返回 None"""
+        icons = self.resource.jiao_yi_zhong_xin_icon or []
+        best = None
+        for icon in icons:
+            match = self.find(frame, icon)
+            if match is not None and (best is None or match["score"] > best["score"]):
+                best = match
+        return best
 
     def give_item(self,frame):
         return self.find(frame, self.resource.xiu_ye_give_item_icon) is not None
@@ -642,7 +683,6 @@ class GameController:
                             human_delay(1)
                             frame = self.grab_frame(region)
 
-                            print("开始购买")
                             # 如果弹出价格确认
                             item_que_ren_match = self.find(frame, self.resource.item_xu_que_ren_icon)
                             if item_que_ren_match is not None:
@@ -831,10 +871,6 @@ class GameController:
                     region = make_mss_region(hwnd,self.roi)
                     frame = self.wait_until(region, self.is_open_f9, action=press_f9)
 
-                    match_result = self.find_xiu_lian_task(frame)
-                    # 这个是修炼任务完成后,定位修炼任务的坐标,然后再点击,因为直接用xiu_lian_task_abs_x的话,未完成和完成之后的任务栏的尺寸不一样
-                    xiu_lian_abs_x,xiu_lian_abs_y = get_abs_x_y_cv(match_result["bbox"],left, top)
-
                     # 判断有没有修炼任务,如果没有,就认为没开始接任务,就从日历开始寻路
                     if not self.has_xiu_lian_task(frame):
 
@@ -864,21 +900,23 @@ class GameController:
                         self.click_match(match, left, top)
                         pyautogui.press('esc')
 
-                    # todo 如果是购物,就不要用蓝色定位了,直接匹配交易中心即可
-                    frame = self.grab_frame(region, "raw")
-                    color_result = get_color(frame,'blue',self.radio)
+                    human_delay(0.1)
+                    frame = self.grab_frame(region)
+                    match_result = self.find_xiu_lian_task(frame)
+                    # 这个是修炼任务完成后,定位修炼任务的坐标,然后再点击,因为直接用xiu_lian_task_abs_x的话,未完成和完成之后的任务栏的尺寸不一样
+                    xiu_lian_abs_x,xiu_lian_abs_y = get_abs_x_y_cv(match_result["bbox"],left, top)
 
-                    if not color_result:
-                        print("❌ 未找到蓝色图标")
-                        return
-                
                     frame = self.grab_frame(region)
                     task_type = self.get_xiu_lian_task_type(frame)
 
-                    xiu_lian_task_abs_x,xiu_lian_task_abs_y = get_abs_x_y_cv(color_result,left, top)
                     if task_type == XiuLianTaskType.XUN_WU:
                         print("开始修练寻物任务")
-                        self.mouse.click_on([xiu_lian_task_abs_x, xiu_lian_task_abs_y]) 
+
+                        frame = self.grab_frame(region)
+                        match_result = self.find_jiao_yi_zhong_xin(frame)
+                        jiao_yi_zhong_xin_abs_x,jiao_yi_zhong_xin_abs_y = get_abs_x_y_cv(match_result["bbox"],left, top)
+
+                        self.mouse.click_on([jiao_yi_zhong_xin_abs_x, jiao_yi_zhong_xin_abs_y]) 
                         human_delay(2)
 
                         item_buy_button_match = self.wait_shop_buy_button(
@@ -887,7 +925,6 @@ class GameController:
 
                         # 确保购买成功
                         while True:
-                            print("开始购买")
                             self.click_match(item_buy_button_match, left, top)
                             human_delay(1)
                             frame = self.grab_frame(region)
@@ -934,6 +971,15 @@ class GameController:
 
                         # 确保关闭了对话
                         self.close_talk(region, lead=1)
+                        continue
+
+                    frame = self.grab_frame(region, "raw")
+                    color_result = get_color(frame,'blue',self.radio)
+
+                    if not color_result:
+                        print("❌ 未找到蓝色图标")
+                        return
+                    xiu_lian_task_abs_x,xiu_lian_task_abs_y = get_abs_x_y_cv(color_result,left, top)
 
                     # 找人
                     if task_type == XiuLianTaskType.ZHAO_REN:
@@ -948,7 +994,7 @@ class GameController:
                         self.close_talk(region, lead=1)
                         print("✅ 修炼任务关闭对话框成功")
 
-                    # 打架
+                    # 找疯道人
                     if task_type == XiuLianTaskType.FENG_DAO_REN:
                         print("开始修练疯道人任务")
                         auto_reset_round()
@@ -967,6 +1013,7 @@ class GameController:
                         self.close_talk(region, lead=1, gap=1)
                         print("修炼任务关闭对话框成功")
                         self.hwnd_status[hwnd].is_finish_xiu_lian = True
+
                 except Exception:
                     count = self.window_fail_counts.get(hwnd, 0) + 1
                     self.window_fail_counts[hwnd] = count
@@ -1033,6 +1080,88 @@ class GameController:
     def icon_names(self):
         """全部图标属性名（诊断面板下拉框用）"""
         return sorted(name for name in vars(self.resource) if name.endswith("_icon"))
+
+    # 挖宝图
+    def bao_tu(self,hwnd_index=0):
+        hwnd = self.hwnd_list[hwnd_index]
+        region = make_mss_region(hwnd, self.roi)
+
+        self.wait_until(region, self.is_open_f9, action=press_f9)
+        frame = self.wait_until(region,self.is_open_bag,want=True,action=open_bag_keyboard,action_first=True)
+
+        all_match = self.find_all(frame,self.resource.si_nan_icon,0.7)
+
+    def _detect_bao_ta(self, region, stop_event=None, timeout=None):
+        if timeout is None:
+            timeout = bao_ta_timeout
+
+        prev_gray = None
+        last_check = time.monotonic()
+
+        while not is_stopped(stop_event):
+            if time.monotonic() - last_check < bao_ta_diff_interval:
+                human_delay(0.05)
+                continue
+
+            frame = self.grab_frame(region, "gray")
+            gray = cv2.GaussianBlur(frame, (5, 5), 0)
+
+            if prev_gray is None:
+                prev_gray = gray
+                last_check = time.monotonic()
+                continue
+
+            diff = cv2.absdiff(prev_gray, gray)
+
+            # 中央台面 ROI 掩膜：屏蔽顶部状态栏与底部聊天栏
+            h, w = diff.shape[:2]
+            roi_mask = np.zeros((h, w), dtype=np.uint8)
+            roi_mask[int(h * 0.15):int(h * 0.85), int(w * 0.20):int(w * 0.80)] = 255
+            diff = cv2.bitwise_and(diff, diff, mask=roi_mask)
+
+            # 阈值二值化与形态学膨胀
+            _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+            dilated = cv2.dilate(thresh, kernel, iterations=2)
+
+            # 寻找运动轮廓，按面积与宽高比过滤候选
+            contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            candidates = []
+            for cnt in contours:
+                area = cv2.contourArea(cnt)
+                if bao_ta_min_area < area < bao_ta_max_area:
+                    x, y, bw, bh = cv2.boundingRect(cnt)
+                    if 0.5 < bw / bh < 2.0:
+                        candidates.append((area, (x, y, bw, bh)))
+
+            if candidates:
+                # 取动态面积最大的连通块作为目标
+                candidates.sort(key=lambda item: item[0], reverse=True)
+                return candidates[0][1]
+
+            # 未命中：推进帧对比基准，继续下一轮
+            prev_gray = gray
+            last_check = time.monotonic()
+
+        return None
+
+    def bao_ta(self, hwnd_index=0, stop_event=None):
+        """宝塔任务：开 f9 面板后用帧间差分找动态宝塔目标，点击并返回其中心坐标。
+
+        返回 (abs_x, abs_y) 屏幕绝对坐标；超时未检测到返回 None。
+        """
+        hwnd = self.hwnd_list[hwnd_index]
+        region = make_mss_region(hwnd, self.roi)
+
+        bbox = self._detect_bao_ta(region, stop_event)
+        if bbox is None:
+            print("❌ 宝塔检测超时，未找到动态目标")
+            return None
+
+        abs_x, abs_y = get_abs_x_y_cv(bbox, region["left"], region["top"])
+        human_delay(0.2)
+        self.mouse.click_on([abs_x, abs_y])
+        return abs_x, abs_y
 
     def test_resources(self, hwnd_index=0, stop_event=None, threshold=None, icon_names=None):
         """测试 resource 中的图标能否在当前游戏窗口检测到。
@@ -1103,4 +1232,3 @@ class GameController:
                 break
 
         cv2.destroyAllWindows()
-

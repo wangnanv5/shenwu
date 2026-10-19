@@ -42,7 +42,8 @@ class GameResource:
         self.bag_icon = self._load_gray(bag_icon_path)
         # f9
         self.f9_icon = self._load_gray(f9_icon_path)
-        self.jiao_yi_zhong_xin_icon = self._load_gray(jiao_yi_zhong_xin_path)
+        # 交易中心可能有多个版本的图标，交给 find_jiao_yi_zhong_xin 逐个匹配取最优
+        self.jiao_yi_zhong_xin_icon = [self._load_gray(jiao_yi_zhong_xin_1_path),self._load_gray(jiao_yi_zhong_xin_2_path),self._load_gray(jiao_yi_zhong_xin_3_path)]
 
         # 修业任务类型,分为捕捉宠物 查找物资 挑战
         self.has_xiu_ye_task_icon = self._load_gray(xiu_ye_path)
@@ -70,6 +71,9 @@ class GameResource:
         self.xiu_lian_feng_dao_ren_icon = self._load_gray(xiu_lian_feng_dao_ren_path)
         self.xiu_lian_bao_hu_feng_dao_ren_icon = self._load_gray(xiu_lian_bao_hu_feng_dao_ren_path)
 
+        # 活动
+        self.si_nan_icon = self._load_gray(si_nan_icon_path)
+        self.bao_ta_kai_shi_tiao_zhan_icon = self._load_gray(bao_ta_kai_shi_tiao_zhan)
     @staticmethod
     def _load(path):
         icon = cv2.imread(str(path))

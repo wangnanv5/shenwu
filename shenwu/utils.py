@@ -365,7 +365,7 @@ def find_best_match(image, templ, threshold, scale=None):
     或 None
     """
     if scale is None:
-        scale = [1.0]
+        scale = 1.0
 
     best = None
 
@@ -408,6 +408,71 @@ def find_best_match(image, templ, threshold, scale=None):
             }
 
     return best
+
+def find_all_match(image, templ, threshold, scale=None, nms_iou=0.3):
+    """
+    在 image 中模板匹配，返回所有命中阈值的结果（同 find_best_match，但不止最佳一个）。
+
+    同一目标周围会有一片相邻像素都超过阈值，用简单 NMS 去重，
+    只保留每个目标的局部峰值。
+
+    返回:
+        [{"bbox": (x, y, w, h), "score": 匹配分数, "scale": 缩放比例}, ...]
+
+    无匹配时返回空列表 []
+    """
+    if scale is None:
+        scale = 1.0
+
+    scale = float(scale)
+
+    h = int(round(templ.shape[0] * scale))
+    w = int(round(templ.shape[1] * scale))
+
+    if h <= 0 or w <= 0:
+        return []
+
+    if h > image.shape[0] or w > image.shape[1]:
+        return []
+
+    if abs(scale - 1.0) < 1e-6:
+        resized_templ = templ
+    else:
+        interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+        resized_templ = cv2.resize(templ, (w, h), interpolation=interp)
+
+    result = cv2.matchTemplate(
+        image,
+        resized_templ,
+        cv2.TM_CCOEFF_NORMED
+    )
+
+    # 所有超过阈值的像素位置作为候选
+    ys, xs = np.where(result >= threshold)
+    if len(xs) == 0:
+        return []
+
+    # 按分数从高到低排序，做 NMS 去掉同一目标的相邻重复命中
+    order = np.argsort(result[ys, xs])[::-1]
+    kept = []
+    for idx in order:
+        x, y = int(xs[idx]), int(ys[idx])
+        candidate = {"bbox": (x, y, w, h), "score": float(result[y, x]), "scale": scale}
+        # 与已保留的框算 IoU，重叠大说明是同一个目标的相邻像素
+        duplicate = False
+        for item in kept:
+            ix1, iy1 = max(x, item["bbox"][0]), max(y, item["bbox"][1])
+            ix2 = min(x + w, item["bbox"][0] + w)
+            iy2 = min(y + h, item["bbox"][1] + h)
+            inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+            iou = inter / (2 * w * h - inter) if inter > 0 else 0.0
+            if iou > nms_iou:
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(candidate)
+
+    return kept
 
 def right_click(cursor,target_point):
     cursor.move_to(target_point)

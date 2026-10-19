@@ -42,7 +42,9 @@ bag_icon_path = image_dir / "Common" / "bag.png"
 # F9
 f9_icon_path = image_dir / "Common" / "f9.png"
 # 交易中心
-jiao_yi_zhong_xin_path = image_dir / "Common" / "jiao_yi_zhong_xin.png"
+jiao_yi_zhong_xin_1_path = image_dir / "Common" / "jiao_yi_zhong_xin_1.png" # 全部的
+jiao_yi_zhong_xin_2_path = image_dir / "Common" / "jiao_yi_zhong_xin_2.png"
+jiao_yi_zhong_xin_3_path = image_dir / "Common" / "jiao_yi_zhong_xin_3.png"
 
 # 除魔相关
 chu_mo_finish_icon_path = image_dir / "ChuMo" / "chu_mo_finished.png"
@@ -71,3 +73,7 @@ xiu_lian_xun_wu_path = image_dir / "XiuLian" / "xiu_lian_xun_wu.png"
 xiu_lian_zhao_ren_path = image_dir / "XiuLian" / "xiu_lian_zhao_ren.png"
 xiu_lian_feng_dao_ren_path = image_dir / "XiuLian" / "xiu_lian_dao_ren.png"
 xiu_lian_bao_hu_feng_dao_ren_path = image_dir / "XiuLian" / "bao_hu_feng_dao_ren.png"
+
+# 活动
+si_nan_icon_path = image_dir / "HuoDong" / "si_nan.png"
+bao_ta_kai_shi_tiao_zhan = image_dir / "HuoDong" / "bao_ta_kai_shi_tiao_zhan.png"

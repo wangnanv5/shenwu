@@ -30,7 +30,7 @@ except Exception:
 ICON_PATH = r"C:\Users\27321\Desktop\1.png"
 
 # 匹配阈值，0.75~0.9 之间调
-THRESHOLD = 0.70
+THRESHOLD = 0.8
 
 # 是否开启多尺度匹配
 # 如果图标可能因为窗口大小、DPI 缩放而变大变小，可以改成 True

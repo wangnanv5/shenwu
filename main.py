@@ -68,7 +68,6 @@ def run_xiu_lian():
 def check_qu_mo():
     click.echo("开始检查驱魔状态")
     get_controller().check_qu_mo()
-
 # python main.py run-fish
 @cli.command()
 def run_fish():

@@ -1198,7 +1198,7 @@ class GameController:
                     break
                 
                 # 这一步是移动鼠标，防止被卡住,因为可能会去点击宝箱奖励按钮
-                self.mouse.move_to((abs_x + 10, abs_y + 10))
+                self.mouse.move_to((abs_x + 30, abs_y + 30))
                 
             self.wait_until(region,self.is_in_fight,want=False)
             print("战斗结束")

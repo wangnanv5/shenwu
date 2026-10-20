@@ -137,7 +137,7 @@ def open_item_shop_keyboard():
 
     pyautogui.keyUp('alt')
 
-def auto_reset_round():
+def auto_reset_round_keyboard():
     human_delay(0.1)
 
     pyautogui.keyDown('ctrl')
@@ -151,7 +151,7 @@ def auto_reset_round():
 
     pyautogui.keyUp('ctrl')
 
-def open_calendar():
+def open_calendar_keyboard():
     human_delay(0.1)
     pyautogui.keyDown('alt')
     human_delay(0.1)
@@ -295,22 +295,6 @@ def check_is_frozen(
     return change_ratio < frozen_ratio_thresh, change_ratio
 
 def make_mss_region(hwnd, roi=None):
-    """
-    根据窗口客户区生成 mss 截图区域。
-
-    参数:
-             roi=(0, 0, 800, 600)
-             表示从窗口客户区左上角开始截 800x600
-
-    返回:
-        mss 可用的 region:
-        {
-            "left": ...,
-            "top": ...,
-            "width": ...,
-            "height": ...
-        }
-    """
     left, top, right, bottom = get_client_rect(hwnd)
 
     win_left = int(left)

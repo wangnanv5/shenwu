@@ -35,6 +35,9 @@ class GameResource:
         self.has_talk_icon = self._load_gray(close_talk_path)
         # 寻路图标
         self.has_xun_lu_icon = self._load_gray(xun_lu_path)
+        # 自动战斗按钮（small 为已开启状态的缩小图）
+        self.zi_dong_small_icon = self._load_gray(zi_dong_small_path)
+        self.zi_dong_icon = self._load_gray(zi_dong_path)
         # 驱魔相关
         self.qu_mo_small_icon = self._load_gray(qu_mo_small_path)
         self.qu_mo_icon = self._load_gray(qu_mo_icon_path)
@@ -44,6 +47,8 @@ class GameResource:
         self.f9_icon = self._load_gray(f9_icon_path)
         # 交易中心可能有多个版本的图标，交给 find_jiao_yi_zhong_xin 逐个匹配取最优
         self.jiao_yi_zhong_xin_icon = [self._load_gray(jiao_yi_zhong_xin_1_path),self._load_gray(jiao_yi_zhong_xin_2_path),self._load_gray(jiao_yi_zhong_xin_3_path)]
+        
+
 
         # 修业任务类型,分为捕捉宠物 查找物资 挑战
         self.has_xiu_ye_task_icon = self._load_gray(xiu_ye_path)
@@ -73,7 +78,12 @@ class GameResource:
 
         # 活动
         self.si_nan_icon = self._load_gray(si_nan_icon_path)
+        # 宝塔
         self.bao_ta_kai_shi_tiao_zhan_icon = self._load_gray(bao_ta_kai_shi_tiao_zhan)
+        self.bao_ta_xing_ji_tiao_jian_icon = self._load_gray(bao_ta_xing_ji_tiao_jian)
+        self.bao_ta_tong_guan_icon = self._load_gray(bao_ta_tong_guan)
+        self.bao_ta_an_niu_icon = self._load_gray(bao_ta_an_niu)
+
     @staticmethod
     def _load(path):
         icon = cv2.imread(str(path))

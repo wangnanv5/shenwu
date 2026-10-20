@@ -20,7 +20,7 @@ from shenwu.config import *
 from shenwu.resource import GameResource
 from shenwu.yolo_detector import DEFAULT_ONNX_MODEL, YoloDetector
 from shenwu.utils import (human_delay,rand_secs,set_current_top,right_click,get_color,
-                          auto_reset_round,open_calendar,open_bag_keyboard,press_f9,find_all_match,
+                          auto_reset_round_keyboard,open_calendar_keyboard,open_bag_keyboard,press_f9,find_all_match,
                           make_mss_region,find_best_match,get_abs_x_y_cv,generate_grid_mask,get_physical_client_rect)
 
 pyautogui.FAILSAFE = True
@@ -295,9 +295,7 @@ class GameController:
         return cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY if mode == "gray" else cv2.COLOR_BGRA2BGR)
 
     def find(self, frame, icon, threshold=None):
-        """模板匹配，默认使用模块级 THRESHOLD；诊断面板可临时传 threshold 调参"""
-        return find_best_match(frame, icon, THRESHOLD if threshold is None else threshold,
-                               self.radio)
+        return find_best_match(frame, icon, THRESHOLD if threshold is None else threshold,self.radio)
 
     def find_all(self, frame, icon, threshold=None):
         """模板匹配，返回所有匹配结果。"""
@@ -378,7 +376,7 @@ class GameController:
         # cv2.imshow("resource 图标检测 - 按 q 退出", display)
         # if cv2.waitKey(1) & 0xFF == ord("q"):
         #     return match is not None
-        return self.find(frame, self.resource.has_talk_icon,0.9) is not None
+        return self.find(frame, self.resource.has_talk_icon,0.8) is not None
 
     def is_has_xun_lu(self,frame):
         return self.find(frame, self.resource.has_xun_lu_icon) is not None
@@ -440,6 +438,55 @@ class GameController:
                                        ],
                                XiuLianTaskType)
 
+    # ---------- 一些状态检查 ----------
+    
+    # 检测是否在驱魔状态,如果没有,使用驱魔香
+    def check_qu_mo(self, hwnd_index=0):
+        hwnd = self.hwnd_list[hwnd_index]
+        self.current_hwnd = hwnd
+        try:
+            set_current_top(hwnd)
+            human_delay(0.1)
+
+            left, top, right, bottom = get_physical_client_rect(hwnd)
+
+            region = make_mss_region(hwnd,self.roi)
+            frame = self.grab_frame(region)
+            match = self.find(frame, self.resource.qu_mo_small_icon)
+
+            if match is None:
+                print("当前不在驱魔状态,使用驱魔香")
+                frame = self.wait_until(region, self.is_open_bag, action=open_bag_keyboard, action_first=True,want=True)
+                match = self.find(frame, self.resource.qu_mo_icon)
+                abs_x,abs_y = get_abs_x_y_cv(match["bbox"],left, top)
+                right_click(self.mouse,[abs_x, abs_y])
+                self.wait_until(region, self.is_open_bag, action=open_bag_keyboard, action_first=False,want=False)
+                self.mouse.move_to([right, bottom])
+            else:
+                print("当前已经在驱魔状态")
+        except Exception:
+            traceback.print_exc()
+            human_delay(1)
+
+    # 重置回合并确保自动战斗开启
+    def reset_round(self, hwnd_index=0):
+        """重置回合：自动战斗已开启（有缩小图标）时只重置回合；未开启则重置后再点「自动」。
+
+        返回 True 表示回合已重置；「自动」图标未找到时返回 False。
+        """
+        hwnd = self.hwnd_list[hwnd_index]
+        region = make_mss_region(hwnd, self.roi)
+
+        auto_reset_round_keyboard()
+
+        # 重置回合后重新截图定位「自动」按钮
+        frame = self.grab_frame(region, "gray")
+        match = self.find(frame, self.resource.zi_dong_icon)
+        if match is None:
+            return 
+
+        self.click_match(match, region["left"], region["top"])
+
     # ---------- 业务流程 ----------
 
     def run_auto_reset_round(self,is_hide=False,stop_event=None):
@@ -452,7 +499,7 @@ class GameController:
                     break
                 self.current_hwnd = hwnd
                 set_current_top(hwnd)
-                auto_reset_round()
+                auto_reset_round_keyboard()
                 if is_hide: 
                     win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
                 human_delay(5)
@@ -476,7 +523,7 @@ class GameController:
                 self.current_hwnd = hwnd
                 try:
                     set_current_top(hwnd)
-                    auto_reset_round()
+                    auto_reset_round_keyboard()
                     human_delay(1)
                     left, top, right, bottom = get_physical_client_rect(hwnd)
 
@@ -628,7 +675,7 @@ class GameController:
                     if match_result is None:
                         # 打开日历
                         def open_calendar_and_wait():
-                            open_calendar()
+                            open_calendar_keyboard()
                             human_delay(1)
 
                         self.wait_until(region, self.is_open_ri_cheng, lead=0.2,action=open_calendar_and_wait)
@@ -719,7 +766,7 @@ class GameController:
                                 break
                         print("给予物品成功")
                         # 确保关闭了对话
-                        self.close_talk(region, lead=0.1)
+                        self.close_talk(region, lead=0.5)
 
                     # 宠物
                     elif task_type == XiuYeTaskType.CHONG_WU:
@@ -749,7 +796,7 @@ class GameController:
 
                     # 战斗
                     elif task_type in (XiuYeTaskType.TIAO_ZHAN, XiuYeTaskType.TIAO_ZHAN_SHOU_XI,XiuYeTaskType.TONG_MEN):
-                        auto_reset_round()
+                        auto_reset_round_keyboard()
                         print("开始修业战斗任务")
 
                         # 确保进入战斗中
@@ -767,7 +814,7 @@ class GameController:
                         self.close_talk(region, lead=0.1, gap=0.1)
                     
                     elif task_type == XiuYeTaskType.LIE_HEN:
-                        auto_reset_round()
+                        auto_reset_round_keyboard()
                         print("开始修业裂痕任务")
 
                         def click_task_and_wait():
@@ -783,7 +830,7 @@ class GameController:
                         human_delay(0.2)
                     
                         self.close_talk(region, lead=1, gap=1)
-                        # auto_reset_round()
+                        # auto_reset_round_keyboard()
 
                         # # 取第二段封印
                         # self.mouse.click_on([xiu_ye_abs_x, xiu_ye_abs_y])
@@ -804,46 +851,6 @@ class GameController:
                         failed_hwnds.append(hwnd)
                     human_delay(1)
                     continue
-
-    # 检测是否在驱魔状态,如果没有,使用驱魔香
-    def check_qu_mo(self):
-        failed_hwnds = []
-        for hwnd in self.hwnd_list:
-            self.current_hwnd = hwnd
-            try:
-                set_current_top(hwnd)
-                human_delay(0.1)
-
-                left, top, right, bottom = get_physical_client_rect(hwnd)
-
-                region = make_mss_region(hwnd,self.roi)
-                frame = self.grab_frame(region)
-                match = self.find(frame, self.resource.qu_mo_small_icon)
-
-                if match is None:
-                    print("当前不在驱魔状态,使用驱魔香")
-
-                    def open_bag():
-                        open_bag_keyboard()
-                        human_delay(0.1)
-
-                    frame = self.wait_until(region, self.is_open_bag, action=open_bag, action_first=True)
-                    match = self.find(frame, self.resource.qu_mo_icon)
-                    abs_x,abs_y = get_abs_x_y_cv(match["bbox"],left, top)
-                    right_click(self.mouse,[abs_x, abs_y])
-                    human_delay(0.1)
-                    open_bag_keyboard()
-                    self.mouse.move_to([right, bottom])
-                else:
-                    print("当前在驱魔状态")
-            except Exception:
-                print(f"❌ hwnd={hwnd} 检查驱魔出错")
-                traceback.print_exc()
-                failed_hwnds.append(hwnd)
-                human_delay(1)
-
-        if failed_hwnds:
-            print(f"⚠️ 检查驱魔在 {len(failed_hwnds)} 个窗口上失败：{failed_hwnds}")
 
     def run_xiu_lian(self,stop_event=None):
         failed_hwnds = []
@@ -876,7 +883,7 @@ class GameController:
 
                         # 打开日历
                         def open_calendar_and_wait():
-                            open_calendar()
+                            open_calendar_keyboard()
                             human_delay(1)
 
                         self.wait_until(region, self.is_open_ri_cheng, lead=0.2,
@@ -997,7 +1004,7 @@ class GameController:
                     # 找疯道人
                     if task_type == XiuLianTaskType.FENG_DAO_REN:
                         print("开始修练疯道人任务")
-                        auto_reset_round()
+                        auto_reset_round_keyboard()
 
                         def click_task_and_wait():
                             self.mouse.click_on([xiu_lian_task_abs_x, xiu_lian_task_abs_y])
@@ -1091,6 +1098,7 @@ class GameController:
 
         all_match = self.find_all(frame,self.resource.si_nan_icon,0.7)
 
+    # 玲珑宝塔
     def _detect_bao_ta(self, region, stop_event=None, timeout=None):
         if timeout is None:
             timeout = bao_ta_timeout
@@ -1152,16 +1160,48 @@ class GameController:
         """
         hwnd = self.hwnd_list[hwnd_index]
         region = make_mss_region(hwnd, self.roi)
+        left, top, right, bottom = get_physical_client_rect(hwnd)
+        
+        while True:
+            self.reset_round(hwnd_index)
+            
+            # 如果此层已经通关,一直点击
+            while True:
+                frame = self.grab_frame(region)
+                human_delay(0.1)
+                if self.find(frame,self.resource.bao_ta_tong_guan_icon,0.9):
+                    match = self.find(frame,self.resource.bao_ta_an_niu_icon)                        
+                    self.click_match(match, left, top,delay=0.1)
+                    human_delay(0.1)
+                else:
+                    break
 
-        bbox = self._detect_bao_ta(region, stop_event)
-        if bbox is None:
-            print("❌ 宝塔检测超时，未找到动态目标")
-            return None
+            # 如果一直没有开始挑战按钮,则一直等待
+            while True:
+                # 检测宝塔战斗目标,等待一会,不然每次战斗完会有弹窗
+                human_delay(3)
+                bbox = self._detect_bao_ta(region, stop_event)
+                if bbox is None:
+                    print("❌ 动态目标检测超时，未找到动态目标")
+                    return None
+                
+                print("✅ 检测到动态目标")
+                abs_x, abs_y = get_abs_x_y_cv(bbox, region["left"], region["top"])
+                human_delay(0.1)
+                self.mouse.click_on([abs_x, abs_y])
 
-        abs_x, abs_y = get_abs_x_y_cv(bbox, region["left"], region["top"])
-        human_delay(0.2)
-        self.mouse.click_on([abs_x, abs_y])
-        return abs_x, abs_y
+                human_delay(2)
+                frame = self.grab_frame(region)
+                item_que_ding_match = self.find(frame,self.resource.bao_ta_kai_shi_tiao_zhan_icon)                        
+                if item_que_ding_match:
+                    self.click_match(item_que_ding_match, region["left"], region["top"],delay=0.1)        
+                    break
+                
+                # 这一步是移动鼠标，防止被卡住,因为可能会去点击宝箱奖励按钮
+                self.mouse.move_to((abs_x + 10, abs_y + 10))
+                
+            self.wait_until(region,self.is_in_fight,want=False)
+            print("战斗结束")
 
     def test_resources(self, hwnd_index=0, stop_event=None, threshold=None, icon_names=None):
         """测试 resource 中的图标能否在当前游戏窗口检测到。

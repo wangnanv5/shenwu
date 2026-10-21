@@ -19,9 +19,7 @@ from humancursor import SystemCursor
 from shenwu.config import *
 from shenwu.resource import GameResource
 from shenwu.yolo_detector import DEFAULT_ONNX_MODEL, YoloDetector
-from shenwu.utils import (human_delay,rand_secs,set_current_top,right_click,get_color,
-                          auto_reset_round_keyboard,open_calendar_keyboard,open_bag_keyboard,press_f9,find_all_match,
-                          make_mss_region,find_best_match,get_abs_x_y_cv,generate_grid_mask,get_physical_client_rect)
+from shenwu.utils import *
 
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.2
@@ -120,9 +118,10 @@ class GameController:
         print(f"初始化成功,找到{len(self.hwnd_list)}个游戏窗口")
         self.set_radio(self.hwnd_list[0])
 
+        print(self.hwnd_list)
         self.mouse = SystemCursor()
         self.resource = GameResource()
-
+        # self.hwnd_list = self.hwnd_list[0]
         # YOLO 检测器：模型文件缺失时只警告不拦截启动（self.yolo = None），
         # 业务方法统一用 self.detect_centers(frame) 取目标中心坐标
         # if os.path.exists(DEFAULT_ONNX_MODEL):
@@ -347,6 +346,12 @@ class GameController:
         abs_x, abs_y = get_abs_x_y_cv(match["bbox"], left, top)
         self.mouse.click_on([abs_x, abs_y])
 
+    def click_match_windows(self, hwnd,match, left, top, delay=0.0):
+        if delay:
+            human_delay(delay)
+        abs_x, abs_y = get_abs_x_y_cv(match["bbox"], left, top)
+        self.mouse.click_on([abs_x, abs_y])
+        windows_click(hwnd)
     # ---------- 页面判断 ----------
 
     def is_in_fight(self,frame):
@@ -1200,6 +1205,53 @@ class GameController:
                 # 这一步是移动鼠标，防止被卡住,因为可能会去点击宝箱奖励按钮
                 self.mouse.move_to((abs_x + 30, abs_y + 30))
                 
+            self.wait_until(region,self.is_in_fight,want=False)
+            print("战斗结束")
+
+    def bao_ta_windows(self, hwnd_index=0, stop_event=None):
+        hwnd = self.hwnd_list[hwnd_index]
+        region = make_mss_region(hwnd, self.roi)
+        
+        while True:
+            self.reset_round(hwnd_index)
+            
+            # 如果此层已经通关,一直点击
+            while True:
+                frame = self.grab_frame(region)
+                human_delay(0.1)
+                if self.find(frame,self.resource.bao_ta_tong_guan_icon,0.9):
+                    match = self.find(frame,self.resource.bao_ta_an_niu_icon)                        
+                    abs_x, abs_y = get_abs_x_y_cv_windows(match["bbox"])
+                    windows_click(hwnd,abs_x,abs_y)
+                    human_delay(0.1)
+                else:
+                    break
+
+            # 如果一直没有开始挑战按钮,则一直等待
+            while True:
+                # 检测宝塔战斗目标,等待一会,不然每次战斗完会有弹窗
+                human_delay(3)
+                bbox = self._detect_bao_ta(region, stop_event)
+                if bbox is None:
+                    print("❌ 动态目标检测超时，未找到动态目标")
+                    return None
+                
+                print("✅ 检测到动态目标")
+                abs_x, abs_y = get_abs_x_y_cv_windows(bbox)
+                windows_click(hwnd,abs_x,abs_y)
+                human_delay(2)
+
+                frame = self.grab_frame(region)
+                item_que_ding_match = self.find(frame,self.resource.bao_ta_kai_shi_tiao_zhan_icon)                        
+                if item_que_ding_match:
+                    abs_x, abs_y = get_abs_x_y_cv_windows(item_que_ding_match["bbox"])
+                    windows_click(hwnd,abs_x,abs_y)
+                    human_delay(1)                    
+                    print("✅ 战斗开始")
+                    break
+                
+                # 这一步是移动鼠标，防止被卡住,因为可能会去点击宝箱奖励按钮
+                move_cursor_to(hwnd,abs_x,abs_y)
             self.wait_until(region,self.is_in_fight,want=False)
             print("战斗结束")
 

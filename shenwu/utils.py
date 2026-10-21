@@ -1,4 +1,5 @@
 import ctypes
+import win32api
 import win32gui
 import win32con
 from ctypes import wintypes
@@ -125,56 +126,57 @@ def set_current_top(hwnd):
         pass
 
 # 仅 legacy/ 使用
-def open_item_shop_keyboard():
-    pyautogui.keyDown('alt')
-    human_delay(0.08)    
+# ---------- 键盘输入（前台操作，需目标窗口处于激活状态） ----------
+# pyautogui 模拟的是真实按键，游戏只认这种输入；按键名沿用 pyautogui 约定
+# （'alt' / 'ctrl' / 'shift' / 'a' / 'f9' / 'enter' 等）。
 
-    pyautogui.keyDown('j')
-    human_delay(0.05)
+def _check_keys(*keys):
+    if not keys or any(not isinstance(k, str) or not k for k in keys):
+        raise ValueError(f"按键名必须是非空字符串，收到 {keys!r}")
 
-    pyautogui.keyUp('j')
-    human_delay(0.06)   
 
-    pyautogui.keyUp('alt')
+def press_key(key, delay=0.1):
+    """按一下单个键（按下并抬起）
 
-def auto_reset_round_keyboard():
-    human_delay(0.1)
+    :param key: pyautogui 按键名，如 'f9'、'enter'
+    :param delay: 按键前的等待秒数
+    """
+    _check_keys(key)
+    human_delay(delay)
+    pyautogui.press(key)
 
-    pyautogui.keyDown('ctrl')
-    human_delay(0.1)  
 
-    pyautogui.keyDown('a')
-    human_delay(0.1)
+def hotkey(*keys, delay=0.1):
+    """依次按下再逆序抬起，模拟组合键，如 hotkey('alt', 'e')
 
-    pyautogui.keyUp('a')
-    human_delay(0.1) 
+    :param keys: 修饰键在前、普通键在后，按住顺序与按下顺序一致
+    :param delay: 组合键前的等待秒数
+    """
+    _check_keys(*keys)
+    human_delay(delay)
+    for k in keys:
+        pyautogui.keyDown(k)
+        human_delay(0.05)
+    for k in reversed(keys):
+        pyautogui.keyUp(k)
+        human_delay(0.05)
 
-    pyautogui.keyUp('ctrl')
-
-def open_calendar_keyboard():
-    human_delay(0.1)
-    pyautogui.keyDown('alt')
-    human_delay(0.1)
-    pyautogui.keyDown('y')
-    human_delay(0.1)
-    pyautogui.keyUp('y')
-    human_delay(0.1)  
-    pyautogui.keyUp('alt')
-
-def open_bag_keyboard():
-    human_delay(0.1)
-    pyautogui.keyDown('alt')
-    human_delay(0.1)
-    pyautogui.keyDown('e')
-    human_delay(0.1)
-    pyautogui.keyUp('e')
-    human_delay(0.1)  
-    pyautogui.keyUp('alt')
 
 def press_f9():
-    human_delay(0.1)
-    pyautogui.press('f9')
-    human_delay(0.1)
+    press_key('f9')
+
+# 仅 legacy/ 使用
+def open_item_shop_keyboard():
+    hotkey('alt', 'j', delay=0.08)
+
+def auto_reset_round_keyboard():
+    hotkey('ctrl', 'a')
+
+def open_calendar_keyboard():
+    hotkey('alt', 'y')
+
+def open_bag_keyboard():
+    hotkey('alt', 'e')
 
 # 仅 legacy/ 使用
 def get_abs_x_y(best_bbox,left,top):
@@ -193,6 +195,13 @@ def get_abs_x_y_cv(best_bbox,left,top):
     abs_x = left + center_x
     abs_y = top + center_y
     return abs_x,abs_y
+
+def get_abs_x_y_cv_windows(best_bbox):
+    x, y, w, h = best_bbox
+    center_x = int(x + w / 2)
+    center_y = int(y + h / 2)
+
+    return center_x,center_y
 
 def get_physical_client_rect(hwnd):
     """获取窗口客户区在屏幕上的真实物理像素坐标（免疫任何第三方库的 DPI 覆盖）"""
@@ -608,3 +617,101 @@ def generate_grid_mask(img,radio, template_path=None):
     # 8. 打印坐标，并保存结果
     print(f"检测到 {len(detected_targets)} 个高亮物品：")
     return detected_targets
+
+
+# ---------- Windows 消息级输入（后台操作，不需要把窗口置顶） ----------
+# 通过 PostMessage 直接向目标窗口投递鼠标消息，窗口在后台也能收到；
+# 坐标一律是窗口客户区坐标（左上角为原点），与模板匹配得到的坐标同坐标系。
+
+def MAKELPARAM(x, y):
+    """把客户区坐标打包成消息 lParam（低 16 位 = x，高 16 位 = y）"""
+    return win32api.MAKELONG(x, y)
+
+def _check_message_target(hwnd, x, y):
+    """校验 hwnd 有效性与客户区坐标范围，非法参数尽早抛错"""
+    if not win32gui.IsWindow(hwnd):
+        raise ValueError(f"无效的窗口句柄: {hwnd!r}")
+    if not (isinstance(x, int) and isinstance(y, int)):
+        raise TypeError(f"坐标必须是整数，收到 x={x!r}, y={y!r}")
+    # lParam 只有 16 位/轴，负数会被错误回绕
+    if not (0 <= x <= 0xFFFF and 0 <= y <= 0xFFFF):
+        raise ValueError(f"坐标超出 16 位范围: x={x}, y={y}")
+
+# 记录每个窗口上次消息移动的终点，作为下次渐进移动的起点（粗略模拟光标状态）
+_last_msg_pos = {}
+
+def _post_mouse_move(hwnd, x, y):
+    win32gui.PostMessage(hwnd, win32con.WM_MOUSEMOVE, 0, MAKELPARAM(x, y))
+
+def _interpolate_move(post_fn, sx, sy, ex, ey, steps, interval):
+    """从 (sx, sy) 到 (ex, ey) 逐点投递，模拟渐进移动；steps<=1 或原地时直接跳"""
+    if steps <= 1 or (sx == ex and sy == ey):
+        post_fn(ex, ey)
+        return
+    for i in range(1, steps + 1):
+        t = i / steps
+        px = int(round(sx + (ex - sx) * t))
+        py = int(round(sy + (ey - sy) * t))
+        post_fn(px, py)
+        time.sleep(interval)
+
+def windows_move_to(hwnd, x, y, steps=None, interval=0.01):
+    """把光标消息渐进移动到窗口客户区 (x, y)，不实际挪动系统鼠标
+
+    直接跳变的单个 WM_MOUSEMOVE 不足以触发某些 UI 的悬停/离开过渡
+    （如消除鼠标提示框），这里按 steps 个中间点渐进移动。
+    起点=该窗口上次消息移动的终点；首次无记录时退化为直接跳转。
+
+    :param steps: 中间点数，缺省按距离每 20px 一点，最多 30 点
+    :param interval: 相邻两点的间隔秒数
+    """
+    _check_message_target(hwnd, x, y)
+    sx, sy = _last_msg_pos.get(hwnd, (x, y))
+    if steps is None:
+        dist = max(abs(x - sx), abs(y - sy))
+        steps = min(30, max(1, dist // 20))
+    _interpolate_move(
+        lambda px, py: (_post_mouse_move(hwnd, px, py), _last_msg_pos.__setitem__(hwnd, (px, py))),
+        sx, sy, x, y, steps, interval,
+    )
+
+def move_cursor_to(hwnd, x, y, steps=None, interval=0.01):
+    """把真实系统光标渐进移动到窗口客户区 (x, y) 对应的屏幕位置
+
+    适用于游戏轮询 GetCursorPos()/原始输入（而非消息队列）的情况：
+    只有真实光标变化才能触发这类游戏的悬停判定。不改变窗口焦点。
+    注意：会占用真实鼠标，多窗口并行时同一时刻只能对一个窗口生效。
+
+    :param steps: 中间点数，缺省按距离每 20px 一点，最多 30 点
+    :param interval: 相邻两点的间隔秒数
+    """
+    _check_message_target(hwnd, x, y)
+    ex, ey = win32gui.ClientToScreen(hwnd, (x, y))
+    sx, sy = win32api.GetCursorPos()
+    if steps is None:
+        dist = max(abs(ex - sx), abs(ey - sy))
+        steps = min(30, max(1, dist // 20))
+    _interpolate_move(
+        lambda px, py: win32api.SetCursorPos((px, py)),
+        sx, sy, ex, ey, steps, interval,
+    )
+
+def windows_click(hwnd, x, y):
+    _post_mouse_move(hwnd, x, y)
+    human_delay(0.02)
+    lparam = MAKELPARAM(x, y)
+    win32gui.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
+    human_delay(0.05)
+    win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lparam)
+
+def windows_scroll(hwnd, x, y, delta):
+    """在窗口客户区 (x, y) 处滚动滚轮
+
+    :param delta: 正数向上滚、负数向下滚，通常用 ±120（一个标准齿格）
+    """
+    if not isinstance(delta, int) or delta == 0:
+        raise ValueError(f"delta 必须是非 0 整数，收到 {delta!r}")
+    # WM_MOUSEWHEEL 的 lParam 用屏幕坐标，需先从客户区换算
+    sx, sy = win32gui.ClientToScreen(hwnd, (x, y))
+    wparam = (delta & 0xFFFF) << 16
+    win32gui.PostMessage(hwnd, win32con.WM_MOUSEWHEEL, wparam, MAKELPARAM(sx, sy))

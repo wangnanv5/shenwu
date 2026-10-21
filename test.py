@@ -5,7 +5,7 @@ from shenwu.controller_cv import GameController
 
 if __name__ == '__main__':
     game_controller = GameController()
-    game_controller.bao_ta()
+    game_controller.bao_ta_windows()
     # game_controller.run_xiu_ye()
     # game_controller.run_xiu_lian()
     # game_controller.bao_ta()

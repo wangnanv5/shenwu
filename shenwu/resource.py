@@ -49,7 +49,6 @@ class GameResource:
         self.jiao_yi_zhong_xin_icon = [self._load_gray(jiao_yi_zhong_xin_1_path),self._load_gray(jiao_yi_zhong_xin_2_path),self._load_gray(jiao_yi_zhong_xin_3_path)]
         
 
-
         # 修业任务类型,分为捕捉宠物 查找物资 挑战
         self.has_xiu_ye_task_icon = self._load_gray(xiu_ye_path)
         # 修业的任务类型图标,分为宠物 物资 挑战

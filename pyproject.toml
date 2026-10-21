@@ -24,6 +24,7 @@ dependencies = [
     "pywin32>=312",
     "rapidocr-onnxruntime>=1.4.4",
     "schedule>=1.2.2",
+    "windows-capture>=2.0.1",
 ]
 
 [project.scripts]

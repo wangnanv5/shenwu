@@ -49,9 +49,16 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+import win32con
+import win32gui
+
 from shenwu.gui import settings
 from shenwu.gui.theme import QSS
 from shenwu.gui.workers import TaskWorker
+
+# 「定位」标识：边框颜色与自动消失时长
+IDENTIFY_COLOR = (255, 200, 0)
+IDENTIFY_SECONDS = 5
 
 GRID_COLUMNS = 4
 
@@ -365,6 +372,13 @@ class MainWindow(QMainWindow):
 
         # 当前选中的窗口（单选）
         self.selected_hwnds: list[int] = []
+
+        # 「定位」按钮的临时标识覆盖层：hwnd -> overlay，5 秒自动消失
+        self._identify_overlays: dict[int, object] = {}
+        self._identify_buttons: dict[int, QPushButton] = {}
+        self._identify_timer = QTimer(self)
+        self._identify_timer.setInterval(30)
+        self._identify_timer.timeout.connect(self._pump_identify)
 
         # 当前任务名（显示在窗口边框上）/ 正在处理的窗口
         self._active_task = ""
@@ -892,9 +906,9 @@ class MainWindow(QMainWindow):
         head.addWidget(self.btn_run)
         head.addWidget(self.btn_stop)
 
-        self.window_table = QTableWidget(0, 2)
+        self.window_table = QTableWidget(0, 3)
         self.window_table.setObjectName("windowTable")
-        self.window_table.setHorizontalHeaderLabels(("HWND", "绑定队列"))
+        self.window_table.setHorizontalHeaderLabels(("HWND", "绑定队列", "操作"))
         self.window_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.window_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.window_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -905,6 +919,7 @@ class MainWindow(QMainWindow):
         header = self.window_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
 
         box = QVBoxLayout(frame)
         box.setContentsMargins(16, 14, 16, 14)
@@ -942,6 +957,7 @@ class MainWindow(QMainWindow):
         saved_server = self.settings.get("selected_server") or ""
         table.blockSignals(True)
         table.setRowCount(len(infos))
+        self._identify_buttons.clear()
 
         for row, (_, hwnd, _title, server) in enumerate(infos):
             hwnd_item = QTableWidgetItem(str(hwnd))
@@ -949,6 +965,13 @@ class MainWindow(QMainWindow):
             table.setItem(row, 0, hwnd_item)
 
             table.setItem(row, 1, QTableWidgetItem(self.bindings.get(hwnd, "")))
+
+            # 「定位」按钮：点击给目标窗口挂临时边框标识，再点提前收起
+            btn = QPushButton("收起" if hwnd in self._identify_overlays else "定位")
+            btn.setToolTip(f"在屏幕上高亮标识 hwnd={hwnd} 对应的窗口（5 秒自动消失）")
+            btn.clicked.connect(lambda _=False, h=hwnd: self._identify_hwnd(h))
+            table.setCellWidget(row, 2, btn)
+            self._identify_buttons[hwnd] = btn
 
             # 上次保存的服务器名 → 恢复选中行（仅内部使用，不在表格显示）
             if server and server == saved_server:
@@ -958,6 +981,8 @@ class MainWindow(QMainWindow):
         self.selected_hwnds = self._selected_hwnds()
         self._update_window_label()
         self._update_run_button()
+        if self._identify_overlays:
+            self._identify_timer.start()
         if force:
             self._append_log(f"🔍 已连接 {len(infos)} 个游戏窗口（按 hwnd 升序）\n")
 
@@ -1067,6 +1092,79 @@ class MainWindow(QMainWindow):
         queue_name = self.combo_run_queue.currentText().strip()
         self.btn_run.setEnabled(
             not busy and hwnd is not None and bool(self.queues.get(queue_name)))
+
+    # ---------- 「定位」按钮：临时高亮标识目标窗口 ----------
+
+    def _identify_hwnd(self, hwnd: int):
+        """给目标窗口挂 5 秒自动消失的彩色边框标识；再次点击提前收起
+
+        标识形式：四周 6px 亮黄边框 + 顶部「👉 hwnd=xxx」标签的置顶覆盖层，
+        独立于目标窗口进程，被遮挡也能看到。
+        - 已失效窗口：IsWindow 检查后提示并刷新列表
+        - 最小化窗口：坐标在屏幕外，先自动还原再标识（覆盖层本身在目标
+          最小化时也会自动隐藏，双保险）
+        - 无响应窗口：覆盖层与定位都只查窗口管理器，不受目标卡死影响
+        """
+        if not win32gui.IsWindow(hwnd):
+            self._append_log(f"❌ hwnd={hwnd} 已失效，无法定位\n")
+            self._refresh_window_table(force=True)
+            return
+        if hwnd in self._identify_overlays:      # 再点一次 = 提前撤掉
+            self._close_identify(hwnd)
+            return
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            self._append_log(f"⚠️ hwnd={hwnd} 处于最小化，已自动还原后标识\n")
+
+        # 延迟导入：windows_utils 触碰进程 DPI 感知，须晚于 QApplication 创建
+        from shenwu.windows_utils import Win32BorderWithLabel
+
+        try:
+            overlay = Win32BorderWithLabel(
+                hwnd,
+                label_text=f"👉 这里 hwnd={hwnd}",
+                border_width=6,
+                color_rgb=IDENTIFY_COLOR,
+            )
+        except Exception as e:
+            self._append_log(f"❌ 标识失败 hwnd={hwnd}：{e}\n")
+            return
+        self._identify_overlays[hwnd] = overlay
+        self._set_identify_button(hwnd)
+        self._identify_timer.start()
+        QTimer.singleShot(IDENTIFY_SECONDS * 1000, lambda: self._close_identify(hwnd))
+        self._append_log(f"👉 正在标识 hwnd={hwnd}（{IDENTIFY_SECONDS} 秒后自动消失）\n")
+
+    def _close_identify(self, hwnd: int):
+        """撤掉指定 hwnd 的标识覆盖层（重复调用安全）"""
+        overlay = self._identify_overlays.pop(hwnd, None)
+        if overlay is not None:
+            try:
+                overlay.close()
+            except Exception:
+                pass
+        self._set_identify_button(hwnd)
+        if not self._identify_overlays:
+            self._identify_timer.stop()
+
+    def _pump_identify(self):
+        """驱动所有标识覆盖层跟随目标窗口；目标关闭时自动移除"""
+        for hwnd in list(self._identify_overlays):
+            overlay = self._identify_overlays.get(hwnd)
+            if overlay is None:
+                continue
+            try:
+                alive = overlay.update_position()
+            except Exception:
+                alive = False
+            if not alive:
+                self._close_identify(hwnd)
+
+    def _set_identify_button(self, hwnd: int):
+        """按钮文字与覆盖层状态保持一致（收起 = 标识正挂着）"""
+        btn = self._identify_buttons.get(hwnd)
+        if btn is not None:
+            btn.setText("收起" if hwnd in self._identify_overlays else "定位")
 
     def _active_controller(self):
         """拿到已构造好的 controller；还没连接过就返回 None（不触发构造）"""
@@ -1512,6 +1610,8 @@ class MainWindow(QMainWindow):
                 return
             self.worker.request_stop()
             self.worker.wait(10000)
+        for hwnd in list(self._identify_overlays):
+            self._close_identify(hwnd)
         self._save_settings()
         if getattr(self, "tray", None) is not None:
             self.tray.hide()

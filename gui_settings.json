@@ -9,18 +9,12 @@
         "key": "xiu_lian",
         "params": {}
       }
-    ],
-    "修炼": [
-      {
-        "key": "xiu_lian",
-        "params": {}
-      }
     ]
   },
   "bindings": {
-    "三生万物": "修炼"
+    "三生万物": "日常"
   },
-  "active_queue": "修炼",
+  "active_queue": "日常",
   "show_dev_tools": false,
   "params": {
     "auto_task": {

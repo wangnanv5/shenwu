@@ -925,7 +925,7 @@ class GameController:
                 frame = self.grab_frame(region)
                 # 判断有没有修炼任务,如果没有,就认为没开始接任务,就从日历开始寻路
                 if not self.has_xiu_lian_task(frame):
-
+                    windows_move_to(hwnd, 100, 200)
                     # 打开日历
                     self.wait_until(region, self.is_open_ri_cheng, lead=0.2,
                                     action=lambda: self.open_calendar_and_wait(region))

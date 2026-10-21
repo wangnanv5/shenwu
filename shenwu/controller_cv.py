@@ -921,9 +921,8 @@ class GameController:
                 human_delay(0.1)
 
                 region = make_region(hwnd)
-                # frame = self.wait_until(region, self.is_open_f9,
-                #                         action=lambda: windows_key(hwnd, 'f9'))
-
+                # frame = self.wait_until(region, self.is_open_f9,action=lambda: windows_key(hwnd, 'f9'))
+                frame = self.grab_frame(region)
                 # 判断有没有修炼任务,如果没有,就认为没开始接任务,就从日历开始寻路
                 if not self.has_xiu_lian_task(frame):
 

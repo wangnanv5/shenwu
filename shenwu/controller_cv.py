@@ -1158,16 +1158,16 @@ class GameController:
 
         return None
 
-    def bao_ta(self, hwnd_index=0, stop_event=None):
+    def bao_ta(self, hwnd_index=0, stop_event=None,count=0):
         """宝塔任务：开 f9 面板后用帧间差分找动态宝塔目标，点击并返回其中心坐标。
-
         返回 (abs_x, abs_y) 屏幕绝对坐标；超时未检测到返回 None。
         """
+        _count = 0
         hwnd = self.hwnd_list[hwnd_index]
         region = make_mss_region(hwnd, self.roi)
         left, top, right, bottom = get_physical_client_rect(hwnd)
         
-        while True:
+        while _count < count:
             self.reset_round(hwnd_index)
             
             # 如果此层已经通关,一直点击
@@ -1195,11 +1195,13 @@ class GameController:
                 human_delay(0.1)
                 self.mouse.click_on([abs_x, abs_y])
 
-                human_delay(2)
+                human_delay(1)
                 frame = self.grab_frame(region)
                 item_que_ding_match = self.find(frame,self.resource.bao_ta_kai_shi_tiao_zhan_icon)                        
                 if item_que_ding_match:
-                    self.click_match(item_que_ding_match, region["left"], region["top"],delay=0.1)        
+                    print("检测到开始挑战按钮")
+                    self.click_match(item_que_ding_match, region["left"], region["top"],delay=0.1)   
+                    human_delay(1)
                     break
                 
                 # 这一步是移动鼠标，防止被卡住,因为可能会去点击宝箱奖励按钮
@@ -1207,6 +1209,7 @@ class GameController:
                 
             self.wait_until(region,self.is_in_fight,want=False)
             print("战斗结束")
+            _count += 1
 
     def bao_ta_windows(self, hwnd_index=0, stop_event=None):
         hwnd = self.hwnd_list[hwnd_index]

@@ -9,8 +9,6 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "click>=8.5.0",
-    "humancursor>=1.1.5",
-    "humanmovemouse>=1.2.0",
     "ipykernel>=7.3.0",
     "matplotlib>=3.11.2",
     "mss>=10.2.0",
@@ -18,9 +16,7 @@ dependencies = [
     "onnxruntime-gpu==1.19.0",
     "opencv-python>=5.0.0.93",
     "pillow>=12.3.0",
-    "pyautogui>=0.9.54",
     "pyqt6>=6.11.0",
-    "pyscreeze>=1.0.1",
     "pywin32>=312",
     "rapidocr-onnxruntime>=1.4.4",
     "schedule>=1.2.2",

@@ -3,11 +3,7 @@ import sys
 import click
 
 def set_dpi_awareness():
-    """把进程声明为 Per-Monitor DPI Aware，脚本才能按屏幕绝对像素操作。
-
-    必须在导入 controller_cv 之前调用：pyautogui 导入时会把进程设成
-    SYSTEM_DPI_AWARE(1)，晚于它设置就会失败，坐标精度反而更差。
-    """
+    """把进程声明为 Per-Monitor DPI Aware，脚本才能按屏幕绝对像素操作"""
     import ctypes
     try:
         # Per-Monitor DPI Aware
@@ -21,8 +17,7 @@ def set_dpi_awareness():
 # gui 命令走另一套：Qt6 创建 QApplication 时会把进程设成 PER_MONITOR_AWARE_V2
 # （比上面的 v1 更完整），而一个进程只允许设置一次，抢先设置会让 Qt 失败并打印
 # 「SetProcessDpiAwarenessContext() failed: 拒绝访问」。
-# 所以启动 GUI 时既不设置 DPI，也不导入下面两个模块 —— 它们会连带导入 pyautogui，
-# 而 pyautogui 导入时就会把进程设成 SYSTEM_DPI_AWARE(1)，同样会抢在 Qt 前面。
+# 所以启动 GUI 时既不设置 DPI，也不导入 controller_cv / utils。
 _IS_GUI = len(sys.argv) > 1 and sys.argv[1] == "gui"
 
 if not _IS_GUI:

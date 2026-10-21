@@ -6,8 +6,8 @@ from shenwu.config import *
 class GameResource:
     """集中加载所有模板图标资源。
 
-    灰度图标用于 cv2.COLOR_BGRA2GRAY 转换后的帧,
-    彩色图标用于 cv2.COLOR_BGRA2BGR 转换后的帧。
+    灰度图标用于 cv2.COLOR_BGR2GRAY 转换后的帧,
+    彩色图标用于 grab_frame(region, "bgr") 返回的 BGR 帧。
     """
 
     def __init__(self):
@@ -19,6 +19,8 @@ class GameResource:
         self.is_in_fight_icon = self._load_gray(is_in_fight_path)
         # 日历
         self.ri_cheng_icon = self._load_gray(ri_cheng_path)
+        # 日程入口小图标（屏幕按钮，替代 Alt+Y 打开日历）
+        self.ri_cheng_small_icon = self._load_gray(ri_cheng_small_path)
         # 宠物商店
         self.pet_shop_icon = self._load_gray(pet_shop_path)
         # 宠物商店购买按钮
@@ -36,8 +38,8 @@ class GameResource:
         # 寻路图标
         self.has_xun_lu_icon = self._load_gray(xun_lu_path)
         # 自动战斗按钮（small 为已开启状态的缩小图）
-        self.zi_dong_small_icon = self._load_gray(zi_dong_small_path)
         self.zi_dong_icon = self._load_gray(zi_dong_path)
+        self.zi_dong_small_icon = self._load_gray(zi_dong_small_path)
         # 驱魔相关
         self.qu_mo_small_icon = self._load_gray(qu_mo_small_path)
         self.qu_mo_icon = self._load_gray(qu_mo_icon_path)

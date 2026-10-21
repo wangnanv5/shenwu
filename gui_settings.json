@@ -66,5 +66,6 @@
     "threshold": 70,
     "icon_name": "bag_icon",
     "color": "blue"
-  }
+  },
+  "selected_server": "三生万物"
 }

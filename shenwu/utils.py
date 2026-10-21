@@ -3,8 +3,9 @@ import win32api
 import win32gui
 import win32con
 from ctypes import wintypes
-user32 = ctypes.windll.user32
+from windows_capture import WindowsCapture, Frame
 
+user32 = ctypes.windll.user32
 # 显式声明 64 位指针参数类型，防止 64 位 Python 发生整型截断
 user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
 user32.SetProcessDpiAwarenessContext.restype = wintypes.BOOL
@@ -27,37 +28,10 @@ user32.LogicalToPhysicalPointForPerMonitorDPI.restype = wintypes.BOOL
 import time
 import threading
 import cv2
-import subprocess
-import pyautogui
 import random
 import math
 import numpy as np
 from PIL import ImageGrab
-from humancursor.utilities.human_curve_generator import HumanizeMouseTrajectory
-
-# ---------- humancursor 边界缺陷修复 ----------
-# generate_random_curve_parameters 会在点击坐标落在 pyautogui.size() 的 15%~85%
-# 区间外时（多开窗口铺到副屏 / 负坐标区很常见）把 offset_boundary_x/y 强制置 0；
-# 此时若鼠标已在目标点（重复点击同一任务点是常态），range(l, r) 为空，库内回退成
-# np.random.choice(l_boundary, ...)——窗口在负坐标区时 l_boundary <= 0，直接抛
-# ValueError: a must be greater than 0 ...。这里用等价但安全的实现替换它：
-# 空范围以左边界撑开 1 像素，保证采样区间永远非空，a 参数不再参与回退。
-def _safe_generate_internal_knots(self, l_boundary, r_boundary,
-                                  d_boundary, u_boundary, knots_count):
-    if not isinstance(knots_count, int) or knots_count < 0:
-        knots_count = 0
-    l_boundary, r_boundary = int(l_boundary), int(r_boundary)
-    d_boundary, u_boundary = int(d_boundary), int(u_boundary)
-    if r_boundary <= l_boundary:
-        r_boundary = l_boundary + 1
-    if u_boundary <= d_boundary:
-        u_boundary = d_boundary + 1
-    knots_x = np.random.choice(range(l_boundary, r_boundary), size=knots_count)
-    knots_y = np.random.choice(range(d_boundary, u_boundary), size=knots_count)
-    return list(zip(knots_x, knots_y))
-
-
-HumanizeMouseTrajectory.generate_internal_knots = _safe_generate_internal_knots
 
 # ---------- 「终止」信号（GUI 的停止按钮用） ----------
 # 置位后 human_delay 会在下一片睡眠（最多 0.1s）内抛 TaskTerminated，把当前任务
@@ -126,57 +100,145 @@ def set_current_top(hwnd):
         pass
 
 # 仅 legacy/ 使用
-# ---------- 键盘输入（前台操作，需目标窗口处于激活状态） ----------
-# pyautogui 模拟的是真实按键，游戏只认这种输入；按键名沿用 pyautogui 约定
-# （'alt' / 'ctrl' / 'shift' / 'a' / 'f9' / 'enter' 等）。
+# ---------- 键盘输入（Windows 消息级，后台操作，不需要窗口前台） ----------
+# 通过 PostMessage 向目标窗口投递 WM_KEYDOWN / WM_KEYUP，窗口在后台也能收到。
+# 按键名约定：'a'-'z'、'0'-'9'、'f1'-'f24'、'enter'/'esc'/'tab'/'space'/'up' 等
+# 方向编辑键，以及 'ctrl'/'alt'/'shift' 修饰键。
 
-def _check_keys(*keys):
-    if not keys or any(not isinstance(k, str) or not k for k in keys):
-        raise ValueError(f"按键名必须是非空字符串，收到 {keys!r}")
+def _check_hwnd(hwnd):
+    if not win32gui.IsWindow(hwnd):
+        raise ValueError(f"无效的窗口句柄: {hwnd!r}")
 
+_WIN_VK = {
+    "enter": win32con.VK_RETURN, "esc": win32con.VK_ESCAPE,
+    "space": win32con.VK_SPACE, "tab": win32con.VK_TAB,
+    "backspace": win32con.VK_BACK, "delete": win32con.VK_DELETE,
+    "insert": win32con.VK_INSERT, "home": win32con.VK_HOME,
+    "end": win32con.VK_END, "pageup": win32con.VK_PRIOR,
+    "pagedown": win32con.VK_NEXT,
+    "up": win32con.VK_UP, "down": win32con.VK_DOWN,
+    "left": win32con.VK_LEFT, "right": win32con.VK_RIGHT,
+    "ctrl": win32con.VK_CONTROL, "alt": win32con.VK_MENU,
+    "shift": win32con.VK_SHIFT,
+}
 
-def press_key(key, delay=0.1):
-    """按一下单个键（按下并抬起）
+def _vk_code(key):
+    """按键名 -> Windows 虚拟键码"""
+    if not isinstance(key, str) or not key:
+        raise ValueError(f"按键名必须是非空字符串，收到 {key!r}")
+    k = key.strip().lower()
+    if k in _WIN_VK:
+        return _WIN_VK[k]
+    if len(k) == 1 and k.isalnum():
+        return ord(k.upper())
+    if k[0] == "f" and k[1:].isdigit():          # f1 ~ f24
+        return win32con.VK_F1 + int(k[1:]) - 1
+    res = win32api.VkKeyScan(k)                  # 其他单个字符（符号等）
+    if res != -1:
+        return res & 0xFF
+    raise ValueError(f"不支持的按键名: {key!r}")
 
-    :param key: pyautogui 按键名，如 'f9'、'enter'
-    :param delay: 按键前的等待秒数
+def _key_lparam(vk, up=False):
+    """构造键盘消息 lParam：重复次数 1 + 扫描码；抬起时补过渡/释放标志位"""
+    scan = win32api.MapVirtualKey(vk, 0)
+    lparam = 1 | (scan << 16)
+    if up:
+        lparam |= (1 << 30) | (1 << 31)
+    return lparam & 0xFFFFFFFF
+
+def _post_key(hwnd, vk, up=False):
+    msg = win32con.WM_KEYUP if up else win32con.WM_KEYDOWN
+    win32gui.PostMessage(hwnd, msg, vk, _key_lparam(vk, up))
+
+def windows_key(hwnd, key, delay=0.05):
+    """向窗口投递一次按键（按下并抬起），不用置顶窗口
+
+    ⚠️ 局限：PostMessage 不更新系统键盘状态表（GetKeyState /
+    GetAsyncKeyState），依赖修饰键状态的游戏热键（如 Ctrl+A）识别不到，
+    会退化成普通字符。带修饰键的组合键请用 hotkey（真实注入）。
+
+    :param key: 按键名，如 'f9'、'esc'、'a'
+    :param delay: 按下与抬起之间的间隔秒数（走 human_delay，可被终止信号打断）
     """
-    _check_keys(key)
-    human_delay(delay)
-    pyautogui.press(key)
+    _check_hwnd(hwnd)
+    vk = _vk_code(key)
+    _post_key(hwnd, vk)
+    if delay:
+        human_delay(delay)
+    _post_key(hwnd, vk, up=True)
 
+def windows_hotkey(hwnd, *keys, delay=0.1):
+    """向窗口投递组合键（按下并抬起），不用置顶窗口
 
-def hotkey(*keys, delay=0.1):
-    """依次按下再逆序抬起，模拟组合键，如 hotkey('alt', 'e')
+    ⚠️ 同 windows_key 的局限：只对「处理窗口消息且不查键盘状态表」的
+    控件可靠；游戏热键请用 hotkey。
 
-    :param keys: 修饰键在前、普通键在后，按住顺序与按下顺序一致
+    :param keys: 修饰键在前、普通键在后，如 windows_hotkey(hwnd, 'alt', 'e')
     :param delay: 组合键前的等待秒数
     """
-    _check_keys(*keys)
-    human_delay(delay)
-    for k in keys:
-        pyautogui.keyDown(k)
+    _check_hwnd(hwnd)
+    if not keys:
+        raise ValueError("组合键至少需要一个按键")
+    vks = [_vk_code(k) for k in keys]
+    if delay:
+        human_delay(delay)
+    for vk in vks:
+        _post_key(hwnd, vk)
         human_delay(0.05)
-    for k in reversed(keys):
-        pyautogui.keyUp(k)
+    for vk in reversed(vks):
+        _post_key(hwnd, vk, up=True)
         human_delay(0.05)
 
+# ---------- 键盘输入（真实注入，作用于前台窗口） ----------
+# 游戏判定组合键（如 Ctrl+A 重置回合）依赖系统键盘状态表，PostMessage
+# 不更新该状态表（修饰键按下了游戏也看不见），因此游戏热键必须真实注入；
+# hwnd 参数用于先把目标窗口带到前台，保证按键落入目标窗口。
 
-def press_f9():
-    press_key('f9')
+def _send_key(vk, up=False):
+    scan = win32api.MapVirtualKey(vk, 0)
+    flags = win32con.KEYEVENTF_KEYUP if up else 0
+    win32api.keybd_event(vk, scan, flags, 0)
 
-# 仅 legacy/ 使用
-def open_item_shop_keyboard():
-    hotkey('alt', 'j', delay=0.08)
+def press_key(key, delay=0.1, hwnd=None):
+    """按一下单个键（真实键盘注入）
 
-def auto_reset_round_keyboard():
-    hotkey('ctrl', 'a')
+    :param key: 按键名，见 _vk_code
+    :param hwnd: 给了就先把这个窗口带到前台，保证按键落入目标窗口
+    :param delay: 注入前的等待秒数；按下与抬起之间固定间隔 0.05s
+    """
+    vk = _vk_code(key)
+    if hwnd is not None:
+        _check_hwnd(hwnd)
+        set_current_top(hwnd)
+    if delay:
+        human_delay(delay)
+    _send_key(vk)
+    human_delay(0.05)
+    _send_key(vk, up=True)
 
-def open_calendar_keyboard():
-    hotkey('alt', 'y')
+def hotkey(*keys, delay=0.1, hwnd=None):
+    """组合键（真实键盘注入），修饰键在前、普通键在后，如 hotkey('ctrl', 'a')
 
-def open_bag_keyboard():
-    hotkey('alt', 'e')
+    游戏按系统键盘状态识别修饰键，必须真实注入；hwnd 给了就先带到前台。
+
+    :param keys: 修饰键在前、普通键在后
+    :param hwnd: 先带到前台的目标窗口
+    :param delay: 组合键前的等待秒数
+    """
+    if not keys:
+        raise ValueError("组合键至少需要一个按键")
+    vks = [_vk_code(k) for k in keys]
+    if hwnd is not None:
+        _check_hwnd(hwnd)
+        set_current_top(hwnd)
+    if delay:
+        human_delay(delay)
+    for vk in vks:
+        _send_key(vk)
+        human_delay(0.05)
+    for vk in reversed(vks):
+        _send_key(vk, up=True)
+        human_delay(0.05)
 
 # 仅 legacy/ 使用
 def get_abs_x_y(best_bbox,left,top):
@@ -303,46 +365,16 @@ def check_is_frozen(
     # 若变化像素比例极小，判定为画面冻结
     return change_ratio < frozen_ratio_thresh, change_ratio
 
-def make_mss_region(hwnd, roi=None):
+def make_region(hwnd):
+    """构造截图/坐标换算用的 region：窗口客户区在屏幕上的位置 + hwnd
+
+    region["left"]/["top"] 是客户区左上角的屏幕坐标（帧内 bbox 加上它们
+    即得屏幕绝对坐标，供真实鼠标点击用）；region["hwnd"] 供 WGC 截图用。
+    """
     left, top, right, bottom = get_client_rect(hwnd)
-
-    win_left = int(left)
-    win_top = int(top)
-    win_w = int(right - left)
-    win_h = int(bottom - top)
-
-    if win_w <= 0 or win_h <= 0:
+    if right - left <= 0 or bottom - top <= 0:
         raise ValueError("窗口客户区大小异常，可能窗口最小化或不可见")
-
-    if roi is None:
-        x = 0
-        y = 0
-        w = win_w
-        h = win_h
-    else:
-        x, y, w, h = roi
-        x = int(x)
-        y = int(y)
-        w = int(w)
-        h = int(h)
-
-        # 防止超出窗口客户区
-        x = max(0, min(x, win_w - 1))
-        y = max(0, min(y, win_h - 1))
-        w = max(0, min(w, win_w - x))
-        h = max(0, min(h, win_h - y))
-
-    if w <= 0 or h <= 0:
-        raise ValueError("截图区域无效，宽或高为 0")
-
-    region = {
-        "left": win_left + x,
-        "top": win_top + y,
-        "width": w,
-        "height": h
-    }
-
-    return region
+    return {"hwnd": hwnd, "left": int(left), "top": int(top)}
 
 def find_best_match(image, templ, threshold, scale=None):
     """
@@ -467,10 +499,12 @@ def find_all_match(image, templ, threshold, scale=None, nms_iou=0.3):
 
     return kept
 
-def right_click(cursor,target_point):
-    cursor.move_to(target_point)
-    human_delay( 0.1)
-    pyautogui.rightClick()
+def restore_window(hwnd):
+    """恢复最小化的窗口（不抢前台）。WGC 截图要求窗口非最小化"""
+    try:
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+    except Exception:
+        pass
 
 def keep_largest_component(mask: np.ndarray) -> np.ndarray:
     """
@@ -504,7 +538,7 @@ def get_color(frame,color=None,radio=1):
     x2, y2 = int(w * 0.95), int(h * 0.38)
     frame = game_image_array[y1:y2,x1:x2]
 
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
     
     if color == "blue":
@@ -629,8 +663,7 @@ def MAKELPARAM(x, y):
 
 def _check_message_target(hwnd, x, y):
     """校验 hwnd 有效性与客户区坐标范围，非法参数尽早抛错"""
-    if not win32gui.IsWindow(hwnd):
-        raise ValueError(f"无效的窗口句柄: {hwnd!r}")
+    _check_hwnd(hwnd)
     if not (isinstance(x, int) and isinstance(y, int)):
         raise TypeError(f"坐标必须是整数，收到 x={x!r}, y={y!r}")
     # lParam 只有 16 位/轴，负数会被错误回绕
@@ -704,6 +737,16 @@ def windows_click(hwnd, x, y):
     human_delay(0.05)
     win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lparam)
 
+def windows_right_click(hwnd, x, y):
+    """向窗口投递一次鼠标右键点击，不用置顶窗口"""
+    _check_message_target(hwnd, x, y)
+    # _post_mouse_move(hwnd, x, y)
+    human_delay(0.02)
+    lparam = MAKELPARAM(x, y)
+    win32gui.PostMessage(hwnd, win32con.WM_RBUTTONDOWN, win32con.MK_RBUTTON, lparam)
+    human_delay(0.05)
+    win32gui.PostMessage(hwnd, win32con.WM_RBUTTONUP, 0, lparam)
+
 def windows_scroll(hwnd, x, y, delta):
     """在窗口客户区 (x, y) 处滚动滚轮
 
@@ -715,3 +758,60 @@ def windows_scroll(hwnd, x, y, delta):
     sx, sy = win32gui.ClientToScreen(hwnd, (x, y))
     wparam = (delta & 0xFFFF) << 16
     win32gui.PostMessage(hwnd, win32con.WM_MOUSEWHEEL, wparam, MAKELPARAM(sx, sy))
+
+dwmapi = ctypes.windll.dwmapi
+DWMWA_EXTENDED_FRAME_BOUNDS = 9   # 可见边界（不含透明调整边框/阴影）
+
+class RECT(ctypes.Structure):
+    _fields_ = [("left", wintypes.LONG), ("top", wintypes.LONG),
+                ("right", wintypes.LONG), ("bottom", wintypes.LONG)]
+
+def get_offsets(hwnd):
+    # 1. 可见边界
+    r = RECT()
+    dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS,ctypes.byref(r), ctypes.sizeof(r))
+    # 2. 客户区左上角的屏幕坐标
+    cx, cy = win32gui.ClientToScreen(hwnd, (0, 0))
+    # 3. 客户区尺寸
+    cl, ct, cr, cb = win32gui.GetClientRect(hwnd)
+    client_w, client_h = cr - cl, cb - ct
+    # 4. 客户区相对"可见边界"的偏移（这才是 WGC 帧里的真实偏移）
+    return client_w, client_h, cx - r.left, cy - r.top
+
+def capture_client_only(hwnd, save_path=None):
+    """用 Windows Graphics Capture 抓取窗口客户区，返回 BGR numpy 数组
+    （shape=(client_h, client_w, 3)）。窗口无需置顶、可被遮挡，不受
+    其他窗口覆盖影响。save_path 给了才顺手存一张，不给就全程不落盘。
+    """
+    client_w, client_h, offset_x, offset_y = get_offsets(hwnd)
+
+    capture = WindowsCapture(cursor_capture=False, draw_border=False,
+                             window_hwnd=hwnd)
+    result = {}          # 用字典把数组带出回调（闭包写外层变量需要可变容器）
+
+    @capture.event
+    def on_frame_arrived(frame: Frame, ctrl):
+        w, h = frame.width, frame.height
+        # Frame -> numpy：convert_to_bgr() 返回的是 Frame，必须再取 .frame_buffer
+        bgr_full = frame.convert_to_bgr().frame_buffer   # ndarray (h, w, 3)
+
+        # 裁掉标题栏与边框（切片越界会静默变短，先夹取）
+        y0 = max(0, min(offset_y, h))
+        x0 = max(0, min(offset_x, w))
+        bgr = bgr_full[y0:y0 + client_h, x0:x0 + client_w]
+
+        result["bgr"] = bgr.copy()          # copy 一份，脱离内部缓冲区
+        if save_path:
+            cv2.imwrite(save_path, bgr)
+
+        ctrl.stop()
+
+    @capture.event
+    def on_closed():
+        pass
+
+    capture.start()      # 阻塞，直到 ctrl.stop() 被调用
+
+    if "bgr" not in result:
+        raise RuntimeError("未收到任何帧：窗口可能已关闭或捕获异常终止")
+    return result["bgr"]

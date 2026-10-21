@@ -33,6 +33,8 @@ close_talk_path = image_dir / "Common" / "close_talk.png"
 xun_lu_path = image_dir / "Common" / "xun_lu.png"
 # 日程
 ri_cheng_path = image_dir / "Common" / "ri_cheng.png"
+# 日程入口的小图标（屏幕上的日程按钮，用于点击打开日历，替代 Alt+Y）
+ri_cheng_small_path = image_dir / "Common" / "ri_cheng_small.png"
 # 驱魔
 qu_mo_small_path = image_dir / "Common" / "qu_mo_small.png"
 # 驱魔物品的图标
@@ -45,12 +47,11 @@ f9_icon_path = image_dir / "Common" / "f9.png"
 jiao_yi_zhong_xin_1_path = image_dir / "Common" / "jiao_yi_zhong_xin_1.png" # 全部的
 jiao_yi_zhong_xin_2_path = image_dir / "Common" / "jiao_yi_zhong_xin_2.png"
 jiao_yi_zhong_xin_3_path = image_dir / "Common" / "jiao_yi_zhong_xin_3.png"
-zi_dong_small_path = image_dir / "Common" / "zi_dong_small.png" # 自动的缩小图
 zi_dong_path = image_dir / "Common" / "zi_dong.png" # 自动按钮
+zi_dong_small_path = image_dir / "Common" / "zi_dong_small.png"
 
 # 除魔相关
 chu_mo_finish_icon_path = image_dir / "ChuMo" / "chu_mo_finished.png"
-
 # 封妖相关
 
 # 修业相关

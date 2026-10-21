@@ -63,7 +63,7 @@ class TaskWorker(QThread):
         request_terminate()
 
     def run(self):
-        # 延迟导入：pyautogui 会在导入时设置进程 DPI 感知，必须晚于 QApplication 创建
+        # 延迟导入：controller_cv 较重（加载图标等），避免拖慢 GUI 启动
         from shenwu.controller_cv import get_controller
         from shenwu.utils import TaskTerminated, clear_terminate
 

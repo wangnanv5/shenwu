@@ -4,25 +4,18 @@ import re
 import time
 from enum import Enum, auto
 
-import mss
 import traceback
-import pyautogui
 import win32gui
 import win32con
 import win32process
 import cv2
 import numpy as np
-from PIL import ImageGrab
 from munch import DefaultMunch
-from humancursor import SystemCursor
 
 from shenwu.config import *
 from shenwu.resource import GameResource
 from shenwu.yolo_detector import DEFAULT_ONNX_MODEL, YoloDetector
 from shenwu.utils import *
-
-pyautogui.FAILSAFE = True
-pyautogui.PAUSE = 0.2
 
 ROI = (0, 0, 800, 600)
 
@@ -41,6 +34,35 @@ bao_ta_diff_interval = 0.12  # 差分时间窗（秒），0.10 ~ 0.15 秒动态�
 bao_ta_min_area = 100        # 最小运动轮廓面积（过滤噪点）
 bao_ta_max_area = 12000      # 最大运动轮廓面积（过滤大面积刷新）
 bao_ta_timeout = 30.0        # 检测超时（秒），超时未找到返回 None
+bao_ta_diff_thresh = 25      # 帧间差分二值化阈值（0-255）
+
+# 中央台面 ROI 掩膜比例：屏蔽顶部状态栏与底部聊天栏，只检测台面区域。
+# 可用 test_bao_ta_mask 实时调参验证后再回填这里。
+bao_ta_mask_top = 0.08       # 上边界（高度比例）
+bao_ta_mask_bottom = 0.75    # 下边界
+bao_ta_mask_left = 0.10      # 左边界（宽度比例）
+bao_ta_mask_right = 0.90     # 右边界
+
+def make_bao_ta_mask(shape, top=None, bottom=None, left=None, right=None):
+    """构造宝塔检测的中央台面 ROI 掩膜（与 _detect_bao_ta 实际使用的完全一致）
+
+    :param shape: 帧的 (h, w) 或完整 shape
+    :param top/bottom/left/right: 四边裁剪比例（0~1），缺省用模块级
+                                  bao_ta_mask_* 常量
+    :return: (mask, rect) —— mask 为 uint8 单通道（白=参与检测区域）；
+             rect=(x1, y1, x2, y2) 为覆盖范围的像素坐标
+    """
+    top = bao_ta_mask_top if top is None else top
+    bottom = bao_ta_mask_bottom if bottom is None else bottom
+    left = bao_ta_mask_left if left is None else left
+    right = bao_ta_mask_right if right is None else right
+
+    h, w = shape[:2]
+    x1, y1 = int(w * left), int(h * top)
+    x2, y2 = int(w * right), int(h * bottom)
+    mask = np.zeros((h, w), dtype=np.uint8)
+    mask[y1:y2, x1:x2] = 255
+    return mask, (x1, y1, x2, y2)
 
 # 修业任务类型(与 resource 图标列表顺序一一对应)
 class XiuYeTaskType(Enum):
@@ -101,7 +123,6 @@ def get_controller():
 class GameController:
     def __init__(self):
         self.hwnd_list = []
-        self.cv = mss.MSS()
 
         # connected_hwnds: 枚举到的全部游戏窗口（GUI 的「已连接」列表）
         # selected_hwnds : GUI 在多选里挑出来的运行目标，为空表示全部已连接窗口
@@ -119,7 +140,6 @@ class GameController:
         self.set_radio(self.hwnd_list[0])
 
         print(self.hwnd_list)
-        self.mouse = SystemCursor()
         self.resource = GameResource()
         # self.hwnd_list = self.hwnd_list[0]
         # YOLO 检测器：模型文件缺失时只警告不拦截启动（self.yolo = None），
@@ -131,7 +151,7 @@ class GameController:
         #     print(f"❌ 未找到 YOLO 模型 {DEFAULT_ONNX_MODEL}，YOLO 检测不可用")
 
     def set_radio(self,hwnd):
-        set_current_top(hwnd)
+        restore_window(hwnd)
         left, top, right, bottom = get_physical_client_rect(hwnd)
         window_height = bottom - top
         radio = window_height / ROI[3]
@@ -283,15 +303,24 @@ class GameController:
     # ---------- 底层：截图 / 匹配 / 轮询 ----------
 
     def grab_frame(self, region, mode="gray"):
-        """截取区域并返回帧。
+        """截取窗口客户区并返回帧（WGC 截图，窗口无需置顶、可被遮挡）。
 
-        mode: gray(默认,配灰度图标) / bgr(配 xiu_lian_finish_icon 这类彩色图标)
-              / raw(不转换,get_color 需要原始 BGRA)
+        region: make_region 返回的 dict，或直接传 hwnd
+        mode  : gray(默认,配灰度图标) / bgr(配 xiu_lian_finish_icon 这类彩色图标)
+                / raw(不转换的 BGR 帧,get_color / generate_grid_mask 需要)
+        帧统一裁剪到 self.roi，帧内坐标系与旧版截图完全一致。
         """
-        frame = np.array(self.cv.grab(region))
-        if mode == "raw":
+        hwnd = region["hwnd"] if isinstance(region, dict) else region
+        frame = capture_client_only(hwnd)
+
+        # 裁剪到 roi（roi 始终从 (0,0) 开始，等价于旧版的子区域截图）
+        rw, rh = self.roi[2], self.roi[3]
+        fh, fw = frame.shape[:2]
+        frame = frame[:min(rh, fh), :min(rw, fw)]
+
+        if mode == "raw" or mode == "bgr":
             return frame
-        return cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY if mode == "gray" else cv2.COLOR_BGRA2BGR)
+        return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     def find(self, frame, icon, threshold=None):
         return find_best_match(frame, icon, THRESHOLD if threshold is None else threshold,self.radio)
@@ -305,6 +334,7 @@ class GameController:
                    action_first=False, lead=1, gap=1, mode="gray"):
         """轮询截图直到 predicate(frame) == want，返回命中的那一帧。
 
+        region: make_region 返回的 dict，或直接传 hwnd
         单次循环：[lead 秒] -> (action_first 时先 action) -> 截图 -> 判定
                   -> 命中返回 / 未命中 -> (否则 action) -> [gap 秒]
 
@@ -327,11 +357,13 @@ class GameController:
 
     def close_talk(self, region, lead=1.0, gap=0.0):
         """循环按 esc 直到 npc 对话弹框消失"""
+        hwnd = region["hwnd"] if isinstance(region, dict) else region
+
         def press_esc():
             if gap:
                 human_delay(gap)
             print("按 esc 关闭对话框")
-            pyautogui.press('esc')
+            windows_key(hwnd, 'esc')
         self.wait_until(region, self.is_has_talk, want=False, lead=lead, action=press_esc)
 
     def wait_shop_buy_button(self, region, shop_predicate, buy_button_icon, gap=0.5):
@@ -339,19 +371,39 @@ class GameController:
         frame = self.wait_until(region, shop_predicate, gap=gap)
         return self.find(frame, buy_button_icon)
 
-    def click_match(self, match, left, top, delay=0.0):
-        """把 match["bbox"] 换算成屏幕坐标并点击，delay 是点击前的等待"""
-        if delay:
-            human_delay(delay)
-        abs_x, abs_y = get_abs_x_y_cv(match["bbox"], left, top)
-        self.mouse.click_on([abs_x, abs_y])
+    def click_match(self, match, region, delay=0.0):
+        """把 match["bbox"] 中心用消息级点击落到窗口客户区，delay 是点击前的等待
 
-    def click_match_windows(self, hwnd,match, left, top, delay=0.0):
+        region: make_region 返回的 dict，或直接传 hwnd
+        """
         if delay:
             human_delay(delay)
-        abs_x, abs_y = get_abs_x_y_cv(match["bbox"], left, top)
-        self.mouse.click_on([abs_x, abs_y])
-        windows_click(hwnd)
+        x, y = get_abs_x_y_cv_windows(match["bbox"])
+        hwnd = region["hwnd"] if isinstance(region, dict) else region
+        windows_click(hwnd, x, y)
+
+    def click_ri_cheng_small(self, region):
+        """识别并点击屏幕上的日程小图标（ri_cheng_small_icon），打开日历
+
+        替代 Alt+Y 组合键的纯后台实现。region: make_region 的 dict 或 hwnd。
+
+        :return: True = 识别到并已点击；False = 未识别到
+        """
+        hwnd = region["hwnd"] if isinstance(region, dict) else region
+        frame = self.grab_frame(region, "gray")
+        match = self.find(frame, self.resource.ri_cheng_small_icon)
+        if match is None:
+            print("❌ 未找到日程小图标（ri_cheng_small）")
+            return False
+        x, y = get_abs_x_y_cv_windows(match["bbox"])
+        windows_click(hwnd, x, y)
+        return True
+
+    def open_calendar_and_wait(self, region):
+        """识别并点击日程小图标打开日历，等待界面响应（替代 Alt+Y 组合键）"""
+        self.click_ri_cheng_small(region)
+        human_delay(1)
+
     # ---------- 页面判断 ----------
 
     def is_in_fight(self,frame):
@@ -450,23 +502,27 @@ class GameController:
         hwnd = self.hwnd_list[hwnd_index]
         self.current_hwnd = hwnd
         try:
-            set_current_top(hwnd)
+            restore_window(hwnd)
             human_delay(0.1)
 
-            left, top, right, bottom = get_physical_client_rect(hwnd)
-
-            region = make_mss_region(hwnd,self.roi)
+            region = make_region(hwnd)
             frame = self.grab_frame(region)
             match = self.find(frame, self.resource.qu_mo_small_icon)
 
             if match is None:
                 print("当前不在驱魔状态,使用驱魔香")
-                frame = self.wait_until(region, self.is_open_bag, action=open_bag_keyboard, action_first=True,want=True)
+                frame = self.wait_until(region, self.is_open_bag,
+                                        action=lambda: hotkey('alt', 'e', hwnd=hwnd),
+                                        action_first=True, want=True)
                 match = self.find(frame, self.resource.qu_mo_icon)
-                abs_x,abs_y = get_abs_x_y_cv(match["bbox"],left, top)
-                right_click(self.mouse,[abs_x, abs_y])
-                self.wait_until(region, self.is_open_bag, action=open_bag_keyboard, action_first=False,want=False)
-                self.mouse.move_to([right, bottom])
+                x, y = get_abs_x_y_cv_windows(match["bbox"])
+                windows_right_click(hwnd, x, y)
+                self.wait_until(region, self.is_open_bag,
+                                action=lambda: hotkey('alt', 'e', hwnd=hwnd),
+                                action_first=False, want=False)
+                # 把消息级光标移到客户区右下角，离开背包区域
+                fw, fh = self.roi[2], self.roi[3]
+                windows_move_to(hwnd, fw - 1, fh - 1)
             else:
                 print("当前已经在驱魔状态")
         except Exception:
@@ -475,22 +531,23 @@ class GameController:
 
     # 重置回合并确保自动战斗开启
     def reset_round(self, hwnd_index=0):
-        """重置回合：自动战斗已开启（有缩小图标）时只重置回合；未开启则重置后再点「自动」。
-
-        返回 True 表示回合已重置；「自动」图标未找到时返回 False。
-        """
         hwnd = self.hwnd_list[hwnd_index]
-        region = make_mss_region(hwnd, self.roi)
-
-        auto_reset_round_keyboard()
-
-        # 重置回合后重新截图定位「自动」按钮
-        frame = self.grab_frame(region, "gray")
-        match = self.find(frame, self.resource.zi_dong_icon)
-        if match is None:
-            return 
-
-        self.click_match(match, region["left"], region["top"])
+        try:
+            region = make_region(hwnd)
+            frame = self.grab_frame(region, "gray")
+            match = self.find(frame, self.resource.zi_dong_icon)
+            if match is None:
+                return False
+            self.click_match(match, region)
+            frame = self.grab_frame(region, "gray")
+            match = self.find(frame, self.resource.zi_dong_small_icon)
+            if match is None:
+                return False
+            self.click_match(match, region)
+            return True
+        except Exception:
+            traceback.print_exc()
+            return False
 
     # ---------- 业务流程 ----------
 
@@ -503,9 +560,9 @@ class GameController:
                 if is_stopped(stop_event):
                     break
                 self.current_hwnd = hwnd
-                set_current_top(hwnd)
-                auto_reset_round_keyboard()
-                if is_hide: 
+                restore_window(hwnd)
+                hotkey('ctrl', 'a', hwnd=hwnd)
+                if is_hide:
                     win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
                 human_delay(5)
 
@@ -527,12 +584,11 @@ class GameController:
 
                 self.current_hwnd = hwnd
                 try:
-                    set_current_top(hwnd)
-                    auto_reset_round_keyboard()
+                    restore_window(hwnd)
+                    hotkey('ctrl', 'a', hwnd=hwnd)
                     human_delay(1)
-                    left, top, right, bottom = get_physical_client_rect(hwnd)
 
-                    region = make_mss_region(hwnd,self.roi)
+                    region = make_region(hwnd)
 
                     # 点击对话框，进入战斗
                     frame = self.grab_frame(region)
@@ -545,7 +601,7 @@ class GameController:
 
                     if finish_match is not None:
                         self.hwnd_status[hwnd].is_finish_xun_you = True
-                        self.click_match(finish_match, left, top, delay=1)
+                        self.click_match(finish_match, region, delay=1)
                         human_delay(5)
 
                     else:
@@ -555,7 +611,7 @@ class GameController:
                             print("模式匹配结果为空")
                             continue
 
-                        self.click_match(match, left, top, delay=1)
+                        self.click_match(match, region, delay=1)
                         human_delay(5)
                     continue
                 except Exception:
@@ -574,34 +630,38 @@ class GameController:
         assert self.hwnd_list , "幻唐志窗口未找到"
 
         hwnd = self.hwnd_list[0]
-        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        win32gui.SetForegroundWindow(hwnd)
+        restore_window(hwnd)
 
         # 抛竿
-        pyautogui.press('f1')
+        press_key('f1', hwnd=hwnd)
         human_delay(2)
-        pyautogui.press('f1')
-
-        left, top, right, bottom = get_physical_client_rect(hwnd)
+        press_key('f1', hwnd=hwnd)
         human_delay(1)
+
+        # 「有鱼」图标只加载一次，用项目统一的 cv2 模板匹配替代 pyautogui.locate
+        you_yu_templ = cv2.imread(str(you_yu_path), cv2.IMREAD_GRAYSCALE)
+        assert you_yu_templ is not None, f"钓鱼图标加载失败: {you_yu_path}"
 
         while True:
             if is_stopped(stop_event):
                 break
-            game_image = ImageGrab.grab(bbox=(left+fish_width_start,top + fish_height_start, left+fish_width_end, top+fish_height_end))
+            # WGC 抓全客户区再裁出浮漂区域，灰度化后做模板匹配
+            frame = capture_client_only(hwnd)
+            crop = frame[fish_height_start:fish_height_end,
+                         fish_width_start:fish_width_end]
+            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 
-            try:
-                start_fight_location = pyautogui.locate(str(you_yu_path),game_image, grayscale=True,confidence=0.7)
-            except Exception as e:
-                print(f"还未钓到鱼 {e}")
+            match = find_best_match(gray, you_yu_templ, 0.7)
+            if match is None:
+                print("还未钓到鱼")
                 human_delay(1)
                 continue
 
-            abs_x = left + start_fight_location.left + start_fight_location.width // 2
-            abs_y = top + start_fight_location.top + start_fight_location.height // 2
-
-            pyautogui.moveTo(abs_x,abs_y, duration=rand_secs(0.2))
-            self.mouse.perform_click()
+            x, y, w, h = match["bbox"]
+            # 裁剪区域坐标换算回客户区坐标
+            client_x = fish_width_start + x + w // 2
+            client_y = fish_height_start + y + h // 2
+            windows_click(hwnd, client_x, client_y)
             human_delay(1)
             break
 
@@ -613,16 +673,13 @@ class GameController:
         for hwnd in self.hwnd_list:
             self.current_hwnd = hwnd
             try:
-                left, top, right, bottom = get_physical_client_rect(hwnd)
                 human_delay(1)
-
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                win32gui.SetForegroundWindow(hwnd)
+                restore_window(hwnd)
 
                 # 先看看能不能找到该任务
                 human_delay(1)
-                game_image = ImageGrab.grab(bbox=(left, top, right, bottom))
-                ocr_result = self.ocr.get_ocr_from_image(game_image, task_name)
+                frame = capture_client_only(hwnd)
+                ocr_result = self.ocr.get_ocr_from_image(frame, task_name)
 
                 if not ocr_result:
                     print(f"❌ hwnd={hwnd} 上 OCR 找不到任务「{task_name}」")
@@ -632,11 +689,9 @@ class GameController:
                 print(f"✅ 检测到任务 {task_name}")
                 best_bbox, best_text, best_conf = max(ocr_result, key=lambda x: x[2])
                 bbox = np.array(best_bbox)
-                center_x = np.mean(bbox[:, 0])
-                center_y = np.mean(bbox[:, 1])
-                abs_x = left + center_x
-                abs_y = top + center_y
-                self.mouse.click_on([abs_x, abs_y])
+                center_x = int(np.mean(bbox[:, 0]))
+                center_y = int(np.mean(bbox[:, 1]))
+                windows_click(hwnd, center_x, center_y)
                 human_delay(1)
             except Exception:
                 print(f"❌ hwnd={hwnd} 执行 OCR 任务出错")
@@ -648,395 +703,369 @@ class GameController:
             print(f"⚠️ OCR 任务在 {len(failed_hwnds)} 个窗口上失败：{failed_hwnds}")
 
     # 修业任务
-    def run_xiu_ye(self,stop_event=None):
-        failed_hwnds = []
+    def run_xiu_ye(self, hwnd_index=0, stop_event=None):
+        """修业任务（单窗口版，按 hwnd_index 定位目标窗口，与 bao_ta 风格一致）。
+
+        GUI 的 TaskWorker 本就逐窗口执行（set_selected_hwnds 后 hwnd_list
+        只含目标窗口，index=0 即命中）；命令行直接指定窗口下标。
+
+        :param hwnd_index: 目标窗口在 hwnd_list 中的下标，越界抛 IndexError
+        """
+        if not 0 <= hwnd_index < len(self.hwnd_list):
+            raise IndexError(
+                f"hwnd_index={hwnd_index} 超出范围，当前游戏窗口数: {len(self.hwnd_list)}")
+        hwnd = self.hwnd_list[hwnd_index]
+
         while True:
             if is_stopped(stop_event):
                 break
-            if all(self.hwnd_status[h].is_finish_xiu_ye for h in self.hwnd_list):
-                if failed_hwnds:
-                    print(f"⚠️ 修业任务跳过 {len(failed_hwnds)} 个窗口：{failed_hwnds}")
+            if self.hwnd_status[hwnd].is_finish_xiu_ye:
+                print("修业任务完成")
                 break
 
-            for hwnd in self.hwnd_list:
-                if is_stopped(stop_event):
-                    break
-                if self.hwnd_status[hwnd].is_finish_xiu_ye:
-                    print("所有窗口的修业任务完成")
-                    continue
+            self.current_hwnd = hwnd
+            try:
+                # restore_window(hwnd)
+                human_delay(0.1)
 
-                self.current_hwnd = hwnd
-                try:
-                    set_current_top(hwnd)
-                    human_delay(0.1)
-                
-                    # 检查页面是否有修业任务
-                    left, top, right, bottom = get_physical_client_rect(hwnd)
+                # 检查页面是否有修业任务
+                region = make_region(hwnd)
+                frame = self.grab_frame(region)
+                match_result = self.find_xiu_ye_task(frame)
 
-                    region = make_mss_region(hwnd,self.roi)
-                    frame = self.grab_frame(region)
-                    match_result = self.find_xiu_ye_task(frame)
+                if match_result is None:
+                    # 打开日历
 
-                    if match_result is None:
-                        # 打开日历
-                        def open_calendar_and_wait():
-                            open_calendar_keyboard()
-                            human_delay(1)
+                    self.wait_until(region, self.is_open_ri_cheng, lead=1,
+                                    action=lambda: self.open_calendar_and_wait(region))
 
-                        self.wait_until(region, self.is_open_ri_cheng, lead=0.2,action=open_calendar_and_wait)
-
-                        frame = self.grab_frame(region, "bgr")
-                        match = self.find(frame, self.resource.xiu_ye_finish_icon)
-                        if match is not None:
-                            self.hwnd_status[hwnd].is_finish_xiu_ye = True
-                            print(" 当日修业任务已完成")
-                            self.wait_until(region, self.is_open_ri_cheng,want=False, lead=0.2,action=open_calendar_and_wait)
-                            continue
-                        else:
-                            # to-do
-                            print("请在任务栏勾选修业任务")
-                            self.hwnd_status[hwnd].is_finish_xiu_ye = True
-                            human_delay(0.2)
-                            continue
-                        # frame = self.grab_frame(region)
-                        # match = self.find(frame, self.resource.xiu_lian_no_finish_icon)
-                        # self.click_match(match, left, top)
-                        # pyautogui.press('esc')
-                        # human_delay(0.1)
-
-                        # frame = self.wait_until(region, self.is_open_xiu_lian_talk, gap=2)
-                        # match = self.find(frame, self.resource.xiu_lian_talk_icon)
-                        # self.click_match(match, left, top)
-                        # pyautogui.press('esc')               
-
-                    frame = self.wait_until(region, self.is_open_f9, action=press_f9)
-                    task_type = self.get_xiu_ye_task_type(frame)
-                
-                    if task_type is None:
-                        print("❌ 修业任务类型错误")
+                    frame = self.grab_frame(region, "bgr")
+                    match = self.find(frame, self.resource.xiu_ye_finish_icon)
+                    if match is not None:
+                        self.hwnd_status[hwnd].is_finish_xiu_ye = True
+                        print(" 当日修业任务已完成")
+                        self.wait_until(region, self.is_open_ri_cheng, want=False, lead=1,
+                                        action=lambda: windows_key(hwnd, 'esc'))
+                        continue
+                    else:
+                        # to-do
+                        print("请在任务栏勾选修业任务")
+                        self.hwnd_status[hwnd].is_finish_xiu_ye = True
+                        human_delay(0.2)
                         continue
 
-                    print(f"✅ 检测到修业任务 {task_type}")
-                    xiu_ye_abs_x,xiu_ye_abs_y = get_abs_x_y_cv(match_result["bbox"],left, top)
-                    human_delay(0.2)
+                frame = self.wait_until(region, self.is_open_f9,
+                                        action=lambda: windows_key(hwnd, 'f9'))
+                task_type = self.get_xiu_ye_task_type(frame)
 
-                    # 物资
-                    if task_type == XiuYeTaskType.WU_ZI:
-                        print("开始修业物资任务")
-                        self.mouse.click_on([xiu_ye_abs_x,xiu_ye_abs_y])
+                if task_type is None:
+                    print("❌ 修业任务类型错误")
+                    continue
+
+                print(f"✅ 检测到修业任务 {task_type}")
+                # 任务点直接用客户区坐标（消息级点击不需要换算屏幕绝对坐标）
+                xiu_ye_x, xiu_ye_y = get_abs_x_y_cv_windows(match_result["bbox"])
+                human_delay(0.2)
+
+                # 物资
+                if task_type == XiuYeTaskType.WU_ZI:
+                    print("开始修业物资任务")
+                    windows_click(hwnd, xiu_ye_x, xiu_ye_y)
+                    human_delay(1)
+
+                    item_buy_button_match = self.wait_shop_buy_button(
+                        region, self.is_open_item_shop,
+                        self.resource.item_shop_buy_button_icon, gap=0.5)
+
+                    while True:
+                        self.click_match(item_buy_button_match, region)
                         human_delay(1)
+                        frame = self.grab_frame(region)
 
-                        item_buy_button_match = self.wait_shop_buy_button(
-                            region, self.is_open_item_shop,
-                            self.resource.item_shop_buy_button_icon, gap=0.5)
-
-                        while True:
-                            self.click_match(item_buy_button_match, left, top)
+                        # 如果弹出价格确认
+                        item_que_ren_match = self.find(frame, self.resource.item_xu_que_ren_icon)
+                        if item_que_ren_match is not None:
+                            self.click_match(item_que_ren_match, region, delay=0.1)
                             human_delay(1)
                             frame = self.grab_frame(region)
 
-                            # 如果弹出价格确认
-                            item_que_ren_match = self.find(frame, self.resource.item_xu_que_ren_icon)
-                            if item_que_ren_match is not None:
-                                self.click_match(item_que_ren_match, left, top, delay=0.1)
-                                human_delay(1)
-                                frame = self.grab_frame(region)
-
-                            if not self.is_open_item_shop(frame):
-                                print("修业任务购买物品成功")
-                                human_delay(0.1)
-                                break
-
-                        # 确保开始自动寻路
-                        def click_task():
-                            self.mouse.click_on([xiu_ye_abs_x, xiu_ye_abs_y])
+                        if not self.is_open_item_shop(frame):
+                            print("修业任务购买物品成功")
                             human_delay(0.1)
+                            break
 
-                        self.wait_until(region, self.is_has_xun_lu, want=False,action=click_task, action_first=True)
-
-                        while True:
-                            frame = self.grab_frame(region, "raw")
-                            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
-
-                            if self.give_item(frame):
-                                print("给予物品")
-                                item_location = generate_grid_mask(frame,self.radio)
-                                for item in item_location:
-                                    center = item["center"]
-                                    self.mouse.click_on([center[0]+left,center[1]+top])
-                                    human_delay(0.1)
-                                item_que_ding_match = self.find(frame,self.resource.xiu_ye_item_que_ding_icon)                        
-                                self.click_match(item_que_ding_match, left, top,delay=0.1)
-                            else:
-                                break
-                        print("给予物品成功")
-                        # 确保关闭了对话
-                        self.close_talk(region, lead=0.5)
-
-                    # 宠物
-                    elif task_type == XiuYeTaskType.CHONG_WU:
-                        print("开始修业宠物任务")
-                        self.mouse.click_on([xiu_ye_abs_x,xiu_ye_abs_y])
-                        human_delay(1) 
-
-                        # 检测是否打开了宠物购买页面
-                        pet_buy_button_match = self.wait_shop_buy_button(
-                            region, self.is_open_pet_shop,
-                            self.resource.pet_shop_button_icon, gap=1)
-                        print("✅ 检测到宠物页面")
-
-                        def click_buy():
-                            self.click_match(pet_buy_button_match, left, top)
-                            human_delay(1)
-
-                        self.wait_until(region, self.is_open_pet_shop, want=False,
-                                        action=click_buy, action_first=True)
-                        print("宠物购买成功")
-                        # 确保开始自动寻路
-                        self.wait_until(region, self.is_has_xun_lu, want=False, lead=0.1,
-                                        action=lambda: self.mouse.click_on([xiu_ye_abs_x, xiu_ye_abs_y]))
-
-                        # 确保关闭了对话
-                        self.close_talk(region, lead=0.1, gap=0.1)
-
-                    # 战斗
-                    elif task_type in (XiuYeTaskType.TIAO_ZHAN, XiuYeTaskType.TIAO_ZHAN_SHOU_XI,XiuYeTaskType.TONG_MEN):
-                        auto_reset_round_keyboard()
-                        print("开始修业战斗任务")
-
-                        # 确保进入战斗中
-                        def click_task_and_wait():
-                            human_delay(1)
-                            self.mouse.click_on([xiu_ye_abs_x, xiu_ye_abs_y])
-                            human_delay(3)
-
-                        self.wait_until(region, self.is_in_fight,action=click_task_and_wait, action_first=True)
-                        human_delay(0.2)
-
-                        self.wait_until(region, self.is_in_fight, want=False, lead=0.1)
-                        human_delay(0.2)
-
-                        self.close_talk(region, lead=0.1, gap=0.1)
-                    
-                    elif task_type == XiuYeTaskType.LIE_HEN:
-                        auto_reset_round_keyboard()
-                        print("开始修业裂痕任务")
-
-                        def click_task_and_wait():
-                            human_delay(1)
-                            self.mouse.click_on([xiu_ye_abs_x, xiu_ye_abs_y])
-                            human_delay(3)
-
-                        # 第一次封印,封印结束出现对话框
-                        self.wait_until(region, self.is_in_fight,action=click_task_and_wait, action_first=True)
-                        human_delay(0.2)
-
-                        self.wait_until(region, self.is_in_fight, want=False, lead=2)
-                        human_delay(0.2)
-                    
-                        self.close_talk(region, lead=1, gap=1)
-                        # auto_reset_round_keyboard()
-
-                        # # 取第二段封印
-                        # self.mouse.click_on([xiu_ye_abs_x, xiu_ye_abs_y])
-
-                        # self.wait_until(region, self.is_in_fight, want=False, lead=2)
-                        # self.close_talk(region, lead=0.2, gap=0.2)
-                    
-                    else:
-                        print("❌ 未知任务类型")
-                except Exception:
-                    count = self.window_fail_counts.get(hwnd, 0) + 1
-                    self.window_fail_counts[hwnd] = count
-                    print(f"❌ 修业任务出错 hwnd={hwnd}（第 {count} 次）")
-                    traceback.print_exc()
-                    if count >= MAX_WINDOW_FAILS:
-                        print(f"⚠️ hwnd={hwnd} 连续失败 {count} 次，跳过该窗口")
-                        self.hwnd_status[hwnd].is_finish_xiu_ye = True
-                        failed_hwnds.append(hwnd)
-                    human_delay(1)
-                    continue
-
-    def run_xiu_lian(self,stop_event=None):
-        failed_hwnds = []
-        while True:
-            if is_stopped(stop_event):
-                break
-            if all(self.hwnd_status[h].is_finish_xiu_lian for h in self.hwnd_list):
-                if failed_hwnds:
-                    print(f"⚠️ 修炼任务跳过 {len(failed_hwnds)} 个窗口：{failed_hwnds}")
-                print("所有窗口的修炼任务完成")
-                break
-
-            for hwnd in self.hwnd_list:
-                if is_stopped(stop_event):
-                    break
-                if self.hwnd_status[hwnd].is_finish_xiu_lian:
-                    continue
-                self.current_hwnd = hwnd
-                try:
-                    set_current_top(hwnd)
-                    human_delay(0.1)
-
-                    left, top, right, bottom = get_physical_client_rect(hwnd)
-
-                    region = make_mss_region(hwnd,self.roi)
-                    frame = self.wait_until(region, self.is_open_f9, action=press_f9)
-
-                    # 判断有没有修炼任务,如果没有,就认为没开始接任务,就从日历开始寻路
-                    if not self.has_xiu_lian_task(frame):
-
-                        # 打开日历
-                        def open_calendar_and_wait():
-                            open_calendar_keyboard()
-                            human_delay(1)
-
-                        self.wait_until(region, self.is_open_ri_cheng, lead=0.2,
-                                        action=open_calendar_and_wait)
-
-                        frame = self.grab_frame(region, "bgr")
-                        match = self.find(frame, self.resource.xiu_lian_finish_icon)
-                        if match is not None:
-                            self.hwnd_status[hwnd].is_finish_xiu_lian = True
-                            print(" 当日修炼任务已完成")
-                            continue
-
-                        frame = self.grab_frame(region)
-                        match = self.find(frame, self.resource.xiu_lian_no_finish_icon)
-                        self.click_match(match, left, top)
-                        pyautogui.press('esc')
+                    # 确保开始自动寻路
+                    def click_task():
+                        windows_click(hwnd, xiu_ye_x, xiu_ye_y)
                         human_delay(0.1)
 
-                        frame = self.wait_until(region, self.is_open_xiu_lian_talk, gap=0.1)
-                        match = self.find(frame, self.resource.xiu_lian_talk_icon)
-                        self.click_match(match, left, top)
-                        pyautogui.press('esc')
+                    self.wait_until(region, self.is_has_xun_lu, want=False,action=click_task, action_first=True)
 
+                    while True:
+                        frame = self.grab_frame(region, "raw")
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                        if self.give_item(frame):
+                            print("给予物品")
+                            item_location = generate_grid_mask(frame,self.radio)
+                            for item in item_location:
+                                center = item["center"]
+                                windows_click(hwnd, center[0], center[1])
+                                human_delay(0.1)
+                            item_que_ding_match = self.find(frame,self.resource.xiu_ye_item_que_ding_icon)
+                            self.click_match(item_que_ding_match, region, delay=0.1)
+                        else:
+                            break
+                    print("给予物品成功")
+                    # 确保关闭了对话
+                    self.close_talk(region, lead=0.5)
+
+                # 宠物
+                elif task_type == XiuYeTaskType.CHONG_WU:
+                    print("开始修业宠物任务")
+                    windows_click(hwnd, xiu_ye_x, xiu_ye_y)
+                    human_delay(1)
+
+                    # 检测是否打开了宠物购买页面
+                    pet_buy_button_match = self.wait_shop_buy_button(
+                        region, self.is_open_pet_shop,
+                        self.resource.pet_shop_button_icon, gap=1)
+                    print("✅ 检测到宠物页面")
+
+                    def click_buy():
+                        self.click_match(pet_buy_button_match, region)
+                        human_delay(1)
+
+                    self.wait_until(region, self.is_open_pet_shop, want=False,
+                                    action=click_buy, action_first=True)
+                    print("宠物购买成功")
+                    # 确保开始自动寻路
+                    self.wait_until(region, self.is_has_xun_lu, want=False, lead=0.1,
+                                    action=lambda: windows_click(hwnd, xiu_ye_x, xiu_ye_y))
+
+                    # 确保关闭了对话
+                    self.close_talk(region, lead=0.1, gap=0.1)
+
+                # 战斗
+                elif task_type in (XiuYeTaskType.TIAO_ZHAN, XiuYeTaskType.TIAO_ZHAN_SHOU_XI,XiuYeTaskType.TONG_MEN):
+                    print("开始修业战斗任务")
+
+                    # 确保进入战斗中
+                    def click_task_and_wait():
+                        human_delay(1)
+                        windows_click(hwnd, xiu_ye_x, xiu_ye_y)
+                        human_delay(3)
+
+                    self.wait_until(region, self.is_in_fight,action=click_task_and_wait, action_first=True)
+                    human_delay(0.2)
+                    self.reset_round(hwnd_index)
+
+                    self.wait_until(region, self.is_in_fight, want=False, lead=0.1)
+                    human_delay(0.2)
+
+                    self.close_talk(region, lead=0.1, gap=0.1)
+
+                elif task_type == XiuYeTaskType.LIE_HEN:
+                    print("开始修业裂痕任务")
+
+                    def click_task_and_wait():
+                        human_delay(1)
+                        windows_click(hwnd, xiu_ye_x, xiu_ye_y)
+                        human_delay(3)
+
+                    # 第一次封印,封印结束出现对话框
+                    self.wait_until(region, self.is_in_fight,action=click_task_and_wait, action_first=True)
+                    human_delay(1)
+                    self.reset_round(hwnd_index)
+
+                    self.wait_until(region, self.is_in_fight, want=False, lead=2)
+                    human_delay(0.2)
+
+                    self.close_talk(region, lead=1, gap=1)
+
+                else:
+                    print("❌ 未知任务类型")
+            except Exception:
+                count = self.window_fail_counts.get(hwnd, 0) + 1
+                self.window_fail_counts[hwnd] = count
+                print(f"❌ 修业任务出错 hwnd={hwnd}（第 {count} 次）")
+                traceback.print_exc()
+                if count >= MAX_WINDOW_FAILS:
+                    print(f"⚠️ hwnd={hwnd} 连续失败 {count} 次，标记任务完成")
+                    self.hwnd_status[hwnd].is_finish_xiu_ye = True
+                human_delay(1)
+                continue
+
+    def run_xiu_lian(self, hwnd_index=0, stop_event=None):
+        """修炼任务（单窗口版，按 hwnd_index 定位目标窗口，与 run_xiu_ye/bao_ta 一致）。
+
+        :param hwnd_index: 目标窗口在 hwnd_list 中的下标，越界抛 IndexError
+        """
+        if not 0 <= hwnd_index < len(self.hwnd_list):
+            raise IndexError(
+                f"hwnd_index={hwnd_index} 超出范围，当前游戏窗口数: {len(self.hwnd_list)}")
+        hwnd = self.hwnd_list[hwnd_index]
+
+        while True:
+            if is_stopped(stop_event):
+                break
+            if self.hwnd_status[hwnd].is_finish_xiu_lian:
+                print("修炼任务完成")
+                break
+
+            self.current_hwnd = hwnd
+            try:
+                human_delay(0.1)
+
+                region = make_region(hwnd)
+                frame = self.wait_until(region, self.is_open_f9,
+                                        action=lambda: windows_key(hwnd, 'f9'))
+
+                # 判断有没有修炼任务,如果没有,就认为没开始接任务,就从日历开始寻路
+                if not self.has_xiu_lian_task(frame):
+
+                    # 打开日历
+                    self.wait_until(region, self.is_open_ri_cheng, lead=0.2,
+                                    action=lambda: self.open_calendar_and_wait(region))
+
+                    frame = self.grab_frame(region, "bgr")
+                    match = self.find(frame, self.resource.xiu_lian_finish_icon)
+                    if match is not None:
+                        self.hwnd_status[hwnd].is_finish_xiu_lian = True
+                        print(" 当日修炼任务已完成")
+                        continue
+
+                    frame = self.grab_frame(region)
+                    match = self.find(frame, self.resource.xiu_lian_no_finish_icon)
+                    self.click_match(match, region)
+                    windows_key(hwnd, 'esc')
                     human_delay(0.1)
-                    frame = self.grab_frame(region)
-                    match_result = self.find_xiu_lian_task(frame)
-                    # 这个是修炼任务完成后,定位修炼任务的坐标,然后再点击,因为直接用xiu_lian_task_abs_x的话,未完成和完成之后的任务栏的尺寸不一样
-                    xiu_lian_abs_x,xiu_lian_abs_y = get_abs_x_y_cv(match_result["bbox"],left, top)
+
+                    frame = self.wait_until(region, self.is_open_xiu_lian_talk, gap=0.1)
+                    match = self.find(frame, self.resource.xiu_lian_talk_icon)
+                    self.click_match(match, region)
+                    human_delay(0.5)
+                    windows_key(hwnd, 'esc')
+
+                human_delay(1)
+                frame = self.grab_frame(region)
+                match_result = self.find_xiu_lian_task(frame)
+                # 这个是修炼任务完成后,定位修炼任务的坐标,然后再点击,因为直接用xiu_lian_task_x的话,未完成和完成之后的任务栏的尺寸不一样
+                xiu_lian_x, xiu_lian_y = get_abs_x_y_cv_windows(match_result["bbox"])
+
+                frame = self.grab_frame(region)
+                task_type = self.get_xiu_lian_task_type(frame)
+
+                if task_type == XiuLianTaskType.XUN_WU:
+                    print("开始修练寻物任务")
 
                     frame = self.grab_frame(region)
-                    task_type = self.get_xiu_lian_task_type(frame)
+                    match_result = self.find_jiao_yi_zhong_xin(frame)
+                    jiao_yi_zhong_xin_x, jiao_yi_zhong_xin_y = get_abs_x_y_cv_windows(match_result["bbox"])
 
-                    if task_type == XiuLianTaskType.XUN_WU:
-                        print("开始修练寻物任务")
+                    windows_click(hwnd, jiao_yi_zhong_xin_x, jiao_yi_zhong_xin_y)
+                    human_delay(2)
 
+                    item_buy_button_match = self.wait_shop_buy_button(
+                        region, self.is_open_item_shop,
+                        self.resource.item_shop_buy_button_icon, gap=0.5)
+
+                    # 确保购买成功
+                    while True:
+                        self.click_match(item_buy_button_match, region)
+                        human_delay(1)
                         frame = self.grab_frame(region)
-                        match_result = self.find_jiao_yi_zhong_xin(frame)
-                        jiao_yi_zhong_xin_abs_x,jiao_yi_zhong_xin_abs_y = get_abs_x_y_cv(match_result["bbox"],left, top)
 
-                        self.mouse.click_on([jiao_yi_zhong_xin_abs_x, jiao_yi_zhong_xin_abs_y]) 
-                        human_delay(2)
-
-                        item_buy_button_match = self.wait_shop_buy_button(
-                            region, self.is_open_item_shop,
-                            self.resource.item_shop_buy_button_icon, gap=0.5)
-
-                        # 确保购买成功
-                        while True:
-                            self.click_match(item_buy_button_match, left, top)
+                        # 如果弹出价格确认
+                        item_que_ren_match = self.find(frame, self.resource.item_xu_que_ren_icon)
+                        if item_que_ren_match is not None:
+                            self.click_match(item_que_ren_match, region, delay=0.1)
                             human_delay(1)
                             frame = self.grab_frame(region)
 
-                            # 如果弹出价格确认
-                            item_que_ren_match = self.find(frame, self.resource.item_xu_que_ren_icon)
-                            if item_que_ren_match is not None:
-                                self.click_match(item_que_ren_match, left, top, delay=0.1)
-                                human_delay(1)
-                                frame = self.grab_frame(region)
+                        if not self.is_open_item_shop(frame):
+                            print("修炼任务购买物品成功")
+                            human_delay(2)
+                            break
 
-                            if not self.is_open_item_shop(frame):
-                                print("修炼任务购买物品成功")
+                    while True:
+                        frame = self.grab_frame(region, "raw")
+                        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        windows_click(hwnd, xiu_lian_x, xiu_lian_y)
+
+                        if self.give_item(frame):
+                            print("给予物品")
+                            item_location = generate_grid_mask(frame,self.radio)
+                            for item in item_location:
+                                center = item["center"]
+                                windows_click(hwnd, center[0], center[1])
                                 human_delay(0.1)
-                                break
+                            item_que_ding_match = self.find(frame,self.resource.xiu_ye_item_que_ding_icon)
+                            self.click_match(item_que_ding_match, region, delay=0.1)
+                            break
+                        elif self.is_has_talk(frame_gray):
+                            human_delay(2)
+                            break
+                        else:
+                            human_delay(2)
 
-                        # self.wait_until(region, self.is_has_xun_lu, want=False, lead=0.1)
-                        # print("修炼任务自动寻路结束")
-                        # human_delay(1)
+                    print("修炼任务给予物品成功")
 
-                        while True:
-                            frame = self.grab_frame(region, "raw")
-                            frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
-                            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
-                            self.mouse.click_on([xiu_lian_abs_x, xiu_lian_abs_y]) 
+                    # 确保关闭了对话
+                    self.close_talk(region, lead=1)
+                    continue
 
-                            if self.give_item(frame):
-                                print("给予物品")
-                                item_location = generate_grid_mask(frame,self.radio)
-                                for item in item_location:
-                                    center = item["center"]
-                                    self.mouse.click_on([center[0]+left,center[1]+top])
-                                    human_delay(0.1)
-                                item_que_ding_match = self.find(frame,self.resource.xiu_ye_item_que_ding_icon)                        
-                                self.click_match(item_que_ding_match, left, top,delay=0.1)
-                                break
-                            elif self.is_has_talk(frame_gray):
-                                human_delay(0.1)
-                                break
-                            else:
-                                human_delay(0.1)
+                frame = self.grab_frame(region, "raw")
+                color_result = get_color(frame,'blue',self.radio)
 
-                        print("修炼任务给予物品成功")
+                if not color_result:
+                    print("❌ 未找到蓝色图标")
+                    return
+                xiu_lian_task_x, xiu_lian_task_y = get_abs_x_y_cv_windows(color_result)
 
-                        # 确保关闭了对话
-                        self.close_talk(region, lead=1)
-                        continue
+                # 找人
+                if task_type == XiuLianTaskType.ZHAO_REN:
+                    print("开始修练找人任务")
+                    windows_click(hwnd, xiu_lian_task_x, xiu_lian_task_y)
+                    human_delay(2)
 
-                    frame = self.grab_frame(region, "raw")
-                    color_result = get_color(frame,'blue',self.radio)
+                    # 确保开始自动寻路
+                    self.wait_until(region, self.is_has_xun_lu, want=False, lead=0.1)
 
-                    if not color_result:
-                        print("❌ 未找到蓝色图标")
-                        return
-                    xiu_lian_task_abs_x,xiu_lian_task_abs_y = get_abs_x_y_cv(color_result,left, top)
+                    # 确保关闭了对话
+                    self.close_talk(region, lead=1)
+                    print("✅ 修炼任务关闭对话框成功")
 
-                    # 找人
-                    if task_type == XiuLianTaskType.ZHAO_REN:
-                        print("开始修练找人任务")
-                        self.mouse.click_on([xiu_lian_task_abs_x, xiu_lian_task_abs_y]) 
+                # 找疯道人
+                if task_type == XiuLianTaskType.FENG_DAO_REN:
+                    print("开始修练疯道人任务")
+                    def click_task_and_wait():
+                        windows_click(hwnd, xiu_lian_task_x, xiu_lian_task_y)
                         human_delay(2)
 
-                        # 确保开始自动寻路
-                        self.wait_until(region, self.is_has_xun_lu, want=False, lead=0.1)
+                    # 确保开始自动寻路
+                    self.wait_until(region, self.is_in_fight,action=click_task_and_wait, action_first=True)
+                    print("开始进入修炼战斗")
+                    self.reset_round(hwnd_index)
 
-                        # 确保关闭了对话
-                        self.close_talk(region, lead=1)
-                        print("✅ 修炼任务关闭对话框成功")
+                    self.wait_until(region, self.is_in_fight, want=False, lead=2)
+                    print("修炼任务结束战斗")
 
-                    # 找疯道人
-                    if task_type == XiuLianTaskType.FENG_DAO_REN:
-                        print("开始修练疯道人任务")
-                        auto_reset_round_keyboard()
+                    self.close_talk(region, lead=1, gap=1)
+                    print("修炼任务关闭对话框成功")
+                    self.hwnd_status[hwnd].is_finish_xiu_lian = True
 
-                        def click_task_and_wait():
-                            self.mouse.click_on([xiu_lian_task_abs_x, xiu_lian_task_abs_y])
-                            human_delay(4)
-
-                        # 确保开始自动寻路
-                        self.wait_until(region, self.is_in_fight,action=click_task_and_wait, action_first=True)
-                        print("开始进入修炼战斗")
-
-                        self.wait_until(region, self.is_in_fight, want=False, lead=2)
-                        print("修炼任务结束战斗")
-
-                        self.close_talk(region, lead=1, gap=1)
-                        print("修炼任务关闭对话框成功")
-                        self.hwnd_status[hwnd].is_finish_xiu_lian = True
-
-                except Exception:
-                    count = self.window_fail_counts.get(hwnd, 0) + 1
-                    self.window_fail_counts[hwnd] = count
-                    print(f"❌ 修炼任务出错 hwnd={hwnd}（第 {count} 次）")
-                    traceback.print_exc()
-                    if count >= MAX_WINDOW_FAILS:
-                        print(f"⚠️ hwnd={hwnd} 连续失败 {count} 次，跳过该窗口")
-                        self.hwnd_status[hwnd].is_finish_xiu_lian = True
-                        failed_hwnds.append(hwnd)
-                    human_delay(1)
-                    continue
+            except Exception:
+                count = self.window_fail_counts.get(hwnd, 0) + 1
+                self.window_fail_counts[hwnd] = count
+                print(f"❌ 修炼任务出错 hwnd={hwnd}（第 {count} 次）")
+                traceback.print_exc()
+                if count >= MAX_WINDOW_FAILS:
+                    print(f"⚠️ hwnd={hwnd} 连续失败 {count} 次，标记任务完成")
+                    self.hwnd_status[hwnd].is_finish_xiu_lian = True
+                human_delay(1)
+                continue
 
     # 诊断用：实时可视化 get_color 的检测结果
     def test_get_color(self, color="blue", hwnd_index=0, stop_event=None):
@@ -1048,18 +1077,15 @@ class GameController:
         控制台在结果变化时打印检测状态，按 q 退出。
         """
         hwnd = self.hwnd_list[hwnd_index]
-        set_current_top(hwnd)
         human_delay(1)
 
         last_result = None
         while True:
             if is_stopped(stop_event):
                 break
-            # 每帧重新生成区域，窗口移动也能跟上
-            region = make_mss_region(hwnd, self.roi)
-            # get_color 内部走 BGRA2RGB，必须喂原始 raw 帧
-            raw = self.grab_frame(region, "raw")
-            display = cv2.cvtColor(raw, cv2.COLOR_BGRA2BGR)
+            # get_color 内部走 BGR2RGB，必须喂原始 raw 帧
+            raw = self.grab_frame(hwnd, "raw")
+            display = raw  # raw 就是 BGR，可直接画框
 
             # 画裁剪搜索区域(0.66, 0.27) ~ (0.95, 0.38)
             h, w = raw.shape[:2]
@@ -1088,23 +1114,21 @@ class GameController:
 
         cv2.destroyAllWindows()
 
-    # 诊断用：检测 resource 中所有图标是否出现在当前游戏窗口
-    def icon_names(self):
-        """全部图标属性名（诊断面板下拉框用）"""
-        return sorted(name for name in vars(self.resource) if name.endswith("_icon"))
-
     # 挖宝图
     def bao_tu(self,hwnd_index=0):
         hwnd = self.hwnd_list[hwnd_index]
-        region = make_mss_region(hwnd, self.roi)
+        region = make_region(hwnd)
 
-        self.wait_until(region, self.is_open_f9, action=press_f9)
-        frame = self.wait_until(region,self.is_open_bag,want=True,action=open_bag_keyboard,action_first=True)
+        self.wait_until(region, self.is_open_f9,
+                        action=lambda: windows_key(hwnd, 'f9'))
+        frame = self.wait_until(region, self.is_open_bag, want=True,
+                                action=lambda: hotkey('alt', 'e', hwnd=hwnd),
+                                action_first=True)
 
         all_match = self.find_all(frame,self.resource.si_nan_icon,0.7)
 
     # 玲珑宝塔
-    def _detect_bao_ta(self, region, stop_event=None, timeout=None):
+    def _detect_bao_ta(self, hwnd, stop_event=None, timeout=None):
         if timeout is None:
             timeout = bao_ta_timeout
 
@@ -1116,7 +1140,8 @@ class GameController:
                 human_delay(0.05)
                 continue
 
-            frame = self.grab_frame(region, "gray")
+            frame = self.grab_frame(hwnd)
+
             gray = cv2.GaussianBlur(frame, (5, 5), 0)
 
             if prev_gray is None:
@@ -1127,13 +1152,11 @@ class GameController:
             diff = cv2.absdiff(prev_gray, gray)
 
             # 中央台面 ROI 掩膜：屏蔽顶部状态栏与底部聊天栏
-            h, w = diff.shape[:2]
-            roi_mask = np.zeros((h, w), dtype=np.uint8)
-            roi_mask[int(h * 0.15):int(h * 0.85), int(w * 0.20):int(w * 0.80)] = 255
+            roi_mask, _ = make_bao_ta_mask(diff.shape[:2])
             diff = cv2.bitwise_and(diff, diff, mask=roi_mask)
 
             # 阈值二值化与形态学膨胀
-            _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+            _, thresh = cv2.threshold(diff, bao_ta_diff_thresh, 255, cv2.THRESH_BINARY)
             kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
             dilated = cv2.dilate(thresh, kernel, iterations=2)
 
@@ -1158,75 +1181,26 @@ class GameController:
 
         return None
 
-    def bao_ta(self, hwnd_index=0, stop_event=None,count=0):
-        """宝塔任务：开 f9 面板后用帧间差分找动态宝塔目标，点击并返回其中心坐标。
-        返回 (abs_x, abs_y) 屏幕绝对坐标；超时未检测到返回 None。
-        """
-        _count = 0
+    def bao_ta(self,hwnd_index=0,count=10, stop_event=None,):
+        if not 0 <= hwnd_index < len(self.hwnd_list):
+            raise IndexError(
+                f"hwnd_index={hwnd_index} 超出范围，当前游戏窗口数: {len(self.hwnd_list)}")
         hwnd = self.hwnd_list[hwnd_index]
-        region = make_mss_region(hwnd, self.roi)
-        left, top, right, bottom = get_physical_client_rect(hwnd)
+        restore_window(hwnd)
+        _count = 0
         
         while _count < count:
-            self.reset_round(hwnd_index)
-            
             # 如果此层已经通关,一直点击
             while True:
-                frame = self.grab_frame(region)
-                human_delay(0.1)
-                if self.find(frame,self.resource.bao_ta_tong_guan_icon,0.9):
-                    match = self.find(frame,self.resource.bao_ta_an_niu_icon)                        
-                    self.click_match(match, left, top,delay=0.1)
-                    human_delay(0.1)
-                else:
-                    break
-
-            # 如果一直没有开始挑战按钮,则一直等待
-            while True:
-                # 检测宝塔战斗目标,等待一会,不然每次战斗完会有弹窗
-                human_delay(3)
-                bbox = self._detect_bao_ta(region, stop_event)
-                if bbox is None:
-                    print("❌ 动态目标检测超时，未找到动态目标")
-                    return None
-                
-                print("✅ 检测到动态目标")
-                abs_x, abs_y = get_abs_x_y_cv(bbox, region["left"], region["top"])
-                human_delay(0.1)
-                self.mouse.click_on([abs_x, abs_y])
-
-                human_delay(1)
-                frame = self.grab_frame(region)
-                item_que_ding_match = self.find(frame,self.resource.bao_ta_kai_shi_tiao_zhan_icon)                        
-                if item_que_ding_match:
-                    print("检测到开始挑战按钮")
-                    self.click_match(item_que_ding_match, region["left"], region["top"],delay=0.1)   
-                    human_delay(1)
-                    break
-                
-                # 这一步是移动鼠标，防止被卡住,因为可能会去点击宝箱奖励按钮
-                self.mouse.move_to((abs_x + 30, abs_y + 30))
-                
-            self.wait_until(region,self.is_in_fight,want=False)
-            print("战斗结束")
-            _count += 1
-
-    def bao_ta_windows(self, hwnd_index=0, stop_event=None):
-        hwnd = self.hwnd_list[hwnd_index]
-        region = make_mss_region(hwnd, self.roi)
-        
-        while True:
-            self.reset_round(hwnd_index)
-            
-            # 如果此层已经通关,一直点击
-            while True:
-                frame = self.grab_frame(region)
+                frame = self.grab_frame(hwnd)
                 human_delay(0.1)
                 if self.find(frame,self.resource.bao_ta_tong_guan_icon,0.9):
                     match = self.find(frame,self.resource.bao_ta_an_niu_icon)                        
                     abs_x, abs_y = get_abs_x_y_cv_windows(match["bbox"])
+                    print("动态目标检测超时，未找到动态目标")
+
                     windows_click(hwnd,abs_x,abs_y)
-                    human_delay(0.1)
+                    human_delay(0.5)
                 else:
                     break
 
@@ -1234,29 +1208,41 @@ class GameController:
             while True:
                 # 检测宝塔战斗目标,等待一会,不然每次战斗完会有弹窗
                 human_delay(3)
-                bbox = self._detect_bao_ta(region, stop_event)
+                bbox = self._detect_bao_ta(hwnd, stop_event)
                 if bbox is None:
                     print("❌ 动态目标检测超时，未找到动态目标")
                     return None
                 
                 print("✅ 检测到动态目标")
+                human_delay(0.1)
                 abs_x, abs_y = get_abs_x_y_cv_windows(bbox)
                 windows_click(hwnd,abs_x,abs_y)
-                human_delay(2)
+                human_delay(3)
 
-                frame = self.grab_frame(region)
-                item_que_ding_match = self.find(frame,self.resource.bao_ta_kai_shi_tiao_zhan_icon)                        
+                frame = self.grab_frame(hwnd)
+
+                item_que_ding_match = self.find(frame,self.resource.bao_ta_kai_shi_tiao_zhan_icon)
                 if item_que_ding_match:
                     abs_x, abs_y = get_abs_x_y_cv_windows(item_que_ding_match["bbox"])
                     windows_click(hwnd,abs_x,abs_y)
-                    human_delay(1)                    
-                    print("✅ 战斗开始")
+                    human_delay(2)                    
                     break
                 
                 # 这一步是移动鼠标，防止被卡住,因为可能会去点击宝箱奖励按钮
                 move_cursor_to(hwnd,abs_x,abs_y)
-            self.wait_until(region,self.is_in_fight,want=False)
+            self.wait_until(hwnd,self.is_in_fight,want=True)
+            print("宝塔战斗开始")
+            human_delay(2) 
+            self.reset_round(hwnd_index)
+            self.wait_until(hwnd,self.is_in_fight,want=False)
             print("战斗结束")
+            _count += 1
+
+    # 测试
+    # 诊断用：检测 resource 中所有图标是否出现在当前游戏窗口
+    def icon_names(self):
+        """全部图标属性名（诊断面板下拉框用）"""
+        return sorted(name for name in vars(self.resource) if name.endswith("_icon"))
 
     def test_resources(self, hwnd_index=0, stop_event=None, threshold=None, icon_names=None):
         """测试 resource 中的图标能否在当前游戏窗口检测到。
@@ -1268,9 +1254,7 @@ class GameController:
         threshold : 临时匹配阈值，不给则用模块级 THRESHOLD
         """
         hwnd = self.hwnd_list[hwnd_index]
-        set_current_top(hwnd)
         human_delay(1)
-        region = make_mss_region(hwnd, self.roi)
 
         # self.close_talk(region, lead=1)
         if icon_names:
@@ -1290,10 +1274,8 @@ class GameController:
         while True:
             if is_stopped(stop_event):
                 break
-            # 每帧重新生成区域，窗口移动也能跟上
-            region = make_mss_region(hwnd, self.roi)
-            gray = self.grab_frame(region, "gray")
-            bgr = self.grab_frame(region, "bgr")
+            gray = self.grab_frame(hwnd, "gray")
+            bgr = self.grab_frame(hwnd, "bgr")
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
             display = bgr.copy()

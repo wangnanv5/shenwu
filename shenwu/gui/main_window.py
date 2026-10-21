@@ -1,9 +1,9 @@
-"""PyQt 主窗口：队列式自动化控制台。
+"""PyQt 主窗口：以 hwnd 为核心的自动化控制台。
 
-执行流程严格是：选择任务队列 -> 绑定/选择 hwnd 窗口 -> 执行。
+执行流程：在窗口列表选中一个 hwnd -> 在窗口面板选择要执行的队列 -> 点「运行」。
 - 队列在「执行队列」面板里自定义（增删任务、排序、新建/删除队列），本地持久化；
-- 窗口列表里多选 hwnd 后「绑定队列」，每个 hwnd 绑定一个队列（按服务器名持久化）；
-- 「执行」按 hwnd 升序逐个窗口跑它绑定的队列（鼠标键盘独占，只能串行）。
+- 运行即把该 hwnd 绑定到所选队列（按服务器名持久化），供定时执行与边框显示复用；
+- 「定时」到点后按各窗口已绑定的队列依次执行（鼠标键盘独占，只能串行）。
 
 任务卡片只负责「编辑参数 + 加入队列」，没有单独的启停按钮；
 开发/测试类功能（诊断等）默认隐藏，通过标题栏的「开发/测试」开关显示。
@@ -544,7 +544,7 @@ class MainWindow(QMainWindow):
     def _build_header(self):
         title = QLabel("幻唐志 · 脚本控制台")
         title.setObjectName("appTitle")
-        sub = QLabel("流程：选择队列 → 绑定窗口 → 执行 · 请先打开游戏窗口")
+        sub = QLabel("流程：选择窗口 → 选择队列 → 运行 · 请先打开游戏窗口")
         sub.setObjectName("appSub")
 
         texts = QVBoxLayout()
@@ -620,27 +620,12 @@ class MainWindow(QMainWindow):
         self.btn_queue_delete = QPushButton("删除")
         self.btn_queue_delete.clicked.connect(self._delete_queue)
 
-        self.queue_progress = QLabel("")
-        self.queue_progress.setObjectName("queueProgress")
-
-        self.btn_queue_run = QPushButton("执行")
-        self.btn_queue_run.setProperty("primary", True)
-        self.btn_queue_run.clicked.connect(self._start_plan)
-
-        self.btn_queue_stop = QPushButton("停止")
-        self.btn_queue_stop.setProperty("danger", True)
-        self.btn_queue_stop.setEnabled(False)
-        self.btn_queue_stop.clicked.connect(lambda: self._on_stop())
-
         row1 = QHBoxLayout()
         row1.setSpacing(10)
         row1.addWidget(label)
         row1.addWidget(self.combo_queue, 1)
         row1.addWidget(self.btn_queue_new)
         row1.addWidget(self.btn_queue_delete)
-        row1.addWidget(self.queue_progress)
-        row1.addWidget(self.btn_queue_run)
-        row1.addWidget(self.btn_queue_stop)
 
         # 队列内容
         self.queue_list = QListWidget()
@@ -733,8 +718,18 @@ class MainWindow(QMainWindow):
 
         self._refresh_queue_list()
         self._refresh_card_badges()
-        self.btn_queue_run.setEnabled(bool(self._build_plan_items()))
+        # 同步窗口面板的运行队列下拉框（保持当前选择不变）
+        current = self.combo_run_queue.currentText()
+        self.combo_run_queue.blockSignals(True)
+        self.combo_run_queue.clear()
+        self.combo_run_queue.addItems(list(self.queues))
+        if current in self.queues:
+            self.combo_run_queue.setCurrentText(current)
+        elif self.active_queue:
+            self.combo_run_queue.setCurrentText(self.active_queue)
+        self.combo_run_queue.blockSignals(False)
         self.btn_queue_delete.setEnabled(len(self.queues) > 1)
+        self._update_run_button()
 
     def _refresh_queue_list(self):
         self.queue_list.clear()
@@ -807,7 +802,7 @@ class MainWindow(QMainWindow):
         self.queues[self.active_queue].append({"key": key, "params": params})
         self._refresh_queue_list()
         self._refresh_card_badges()
-        self.btn_queue_run.setEnabled(bool(self._build_plan_items()))
+        self._update_run_button()
         self._save_settings()
         title = self.cards[key].spec.title
         self._append_log(f"➕ 已把「{title}」加入队列「{self.active_queue}」\n")
@@ -833,7 +828,7 @@ class MainWindow(QMainWindow):
         removed = items.pop(row)
         self._refresh_queue_list()
         self._refresh_card_badges()
-        self.btn_queue_run.setEnabled(bool(self._build_plan_items()))
+        self._update_run_button()
         self._save_settings()
         spec = next((s for s in TASKS if s.key == removed["key"]), None)
         self._append_log(f"➖ 已从队列移除「{spec.title if spec else removed['key']}」\n")
@@ -844,7 +839,7 @@ class MainWindow(QMainWindow):
         self.queues[self.active_queue] = []
         self._refresh_queue_list()
         self._refresh_card_badges()
-        self.btn_queue_run.setEnabled(False)
+        self._update_run_button()
         self._save_settings()
         self._append_log(f"🧹 已清空队列「{self.active_queue}」\n")
 
@@ -879,63 +874,70 @@ class MainWindow(QMainWindow):
         return area
 
     def _build_window_table(self) -> QWidget:
-        """窗口列表：只显示已连接的游戏窗口（按 hwnd 升序），多选后绑定队列"""
+        """窗口列表：已连接的游戏窗口（按 hwnd 升序），单选后选队列直接运行"""
         frame = QFrame()
         frame.setObjectName("card")
 
-        title = QLabel("窗口列表（已连接）")
+        title = QLabel("窗口（hwnd）")
         title.setObjectName("cardTitle")
 
-        self.window_label = QLabel("选择窗口后点「绑定队列」，每个窗口执行各自绑定的队列")
+        self.window_label = QLabel("选中一个窗口，选择队列后点「运行」")
         self.window_label.setObjectName("cardDesc")
-
-        self.btn_bind = QPushButton("绑定队列")
-        self.btn_bind.setToolTip("把当前选中的队列绑定给勾选的窗口（重复绑定会覆盖）")
-        self.btn_bind.clicked.connect(self._bind_selected)
-        self.btn_unbind = QPushButton("解绑")
-        self.btn_unbind.clicked.connect(self._unbind_selected)
-
-        btn_refresh = QPushButton("刷新列表")
-        btn_refresh.clicked.connect(lambda: self._refresh_window_table(force=True))
-        btn_all = QPushButton("全选")
-        btn_all.clicked.connect(self.window_table_select_all)
-        btn_clear = QPushButton("清空选择")
-        btn_clear.clicked.connect(self._clear_window_selection)
 
         self.chk_auto_refresh = QCheckBox("自动刷新")
         self.chk_auto_refresh.setChecked(True)
         self.chk_auto_refresh.setToolTip("空闲时每 5 秒刷新一次窗口列表（任务运行中暂停）")
         self.chk_auto_refresh.toggled.connect(self._on_auto_refresh_toggled)
 
+        btn_refresh = QPushButton("刷新")
+        btn_refresh.clicked.connect(lambda: self._refresh_window_table(force=True))
+
+        # 运行控件：选中 hwnd -> 选队列 -> 运行
+        self.queue_progress = QLabel("")
+        self.queue_progress.setObjectName("queueProgress")
+
+        self.combo_run_queue = QComboBox()
+        self.combo_run_queue.setToolTip("当前选中窗口要执行的队列")
+        self.combo_run_queue.currentTextChanged.connect(lambda _t: self._update_run_button())
+
+        self.btn_run = QPushButton("运行")
+        self.btn_run.setProperty("primary", True)
+        self.btn_run.setEnabled(False)
+        self.btn_run.clicked.connect(self._run_selected)
+
+        self.btn_stop = QPushButton("停止")
+        self.btn_stop.setProperty("danger", True)
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.clicked.connect(lambda: self._on_stop())
+
         head = QHBoxLayout()
         head.setSpacing(10)
         head.addWidget(title)
         head.addWidget(self.window_label, 1)
+        head.addWidget(self.queue_progress)
+        head.addWidget(QLabel("队列"))
+        head.addWidget(self.combo_run_queue)
         head.addWidget(self.chk_auto_refresh)
         head.addWidget(btn_refresh)
-        head.addWidget(btn_all)
-        head.addWidget(btn_clear)
-        head.addWidget(self.btn_bind)
-        head.addWidget(self.btn_unbind)
+        head.addWidget(self.btn_run)
+        head.addWidget(self.btn_stop)
 
-        self.window_table = QTableWidget(0, 6)
+        self.window_table = QTableWidget(0, 4)
         self.window_table.setObjectName("windowTable")
         self.window_table.setHorizontalHeaderLabels(
-            ("HWND", "服务器", "窗口标题", "渲染颜色", "绑定队列", "任务状态"))
+            ("HWND", "服务器", "绑定队列", "任务状态"))
         self.window_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.window_table.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
+        self.window_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.window_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.window_table.verticalHeader().setVisible(False)
-        self.window_table.setFixedHeight(220)
+        self.window_table.setFixedHeight(200)
         self.window_table.itemSelectionChanged.connect(self._on_window_selection_changed)
 
         header = self.window_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
         box = QVBoxLayout(frame)
         box.setContentsMargins(16, 14, 16, 14)
@@ -970,51 +972,35 @@ class MainWindow(QMainWindow):
             return
         self._listed_hwnds = hwnds
 
-        # 每个 hwnd 一个唯一颜色：已分配过的保持原色，避免窗口增减时串色
+        # 每个 hwnd 一个唯一颜色（边框覆盖层用，不在表格显示）
         self._hwnd_colors = assign_colors(hwnds, self._hwnd_colors)
 
         # 窗口集合变化时：清理失效绑定，按保存的 服务器名->队列 恢复
         self._rebind_from_settings(controller)
 
         table = self.window_table
-        previous = set(self.selected_hwnds)
-        saved_servers = set(self.settings.get("selected_servers") or [])
+        saved_server = self.settings.get("selected_server") or ""
         table.blockSignals(True)
         table.setRowCount(len(infos))
 
-        for row, (_, hwnd, window_title, server) in enumerate(infos):
-            color_rgb = self._hwnd_colors[hwnd]
-
+        for row, (_, hwnd, _title, server) in enumerate(infos):
             hwnd_item = QTableWidgetItem(str(hwnd))
             hwnd_item.setData(Qt.ItemDataRole.UserRole, hwnd)
             table.setItem(row, 0, hwnd_item)
 
             table.setItem(row, 1, QTableWidgetItem(server or "-"))
+            table.setItem(row, 2, QTableWidgetItem(self.bindings.get(hwnd, "")))
+            table.setItem(row, 3, QTableWidgetItem(_status_text(statuses.get(hwnd))))
 
-            title_item = QTableWidgetItem(window_title)
-            title_item.setToolTip(window_title)
-            table.setItem(row, 2, title_item)
-
-            color_item = QTableWidgetItem(f"RGB{color_rgb}")
-            color_item.setBackground(QColor(*color_rgb))
-            color_item.setForeground(QColor(255, 255, 255) if _is_dark(color_rgb) else QColor(0, 0, 0))
-            color_item.setToolTip(f"hwnd={hwnd} 的专属渲染颜色 RGB{color_rgb}")
-            table.setItem(row, 3, color_item)
-
-            table.setItem(row, 4, QTableWidgetItem(self.bindings.get(hwnd, "")))
-            table.setItem(row, 5, QTableWidgetItem(_status_text(statuses.get(hwnd))))
-
-            # 之前手动选过 / 上次保存的服务器名 → 自动恢复选择
-            if hwnd in previous or (server in saved_servers and not previous):
-                for column in range(table.columnCount()):
-                    item = table.item(row, column)
-                    if item is not None:
-                        item.setSelected(True)
+            # 上次保存的服务器名 → 恢复选中行
+            if server and server == saved_server:
+                table.selectRow(row)
 
         table.blockSignals(False)
         self.selected_hwnds = self._selected_hwnds()
-        self._sync_overlays(sorted(set(self.selected_hwnds) | set(self.bindings)))
+        self._sync_overlays(self.selected_hwnds)
         self._update_window_label()
+        self._update_run_button()
         if force:
             self._append_log(f"🔍 已连接 {len(infos)} 个游戏窗口（按 hwnd 升序）\n")
 
@@ -1038,7 +1024,7 @@ class MainWindow(QMainWindow):
             if item is None:
                 continue
             hwnd = int(item.data(Qt.ItemDataRole.UserRole))
-            status_item = table.item(row, 5)
+            status_item = table.item(row, 3)
             if status_item is not None:
                 status_item.setText(_status_text(statuses.get(hwnd)))
         table.blockSignals(False)
@@ -1051,7 +1037,7 @@ class MainWindow(QMainWindow):
             if item is None:
                 continue
             hwnd = int(item.data(Qt.ItemDataRole.UserRole))
-            bind_item = table.item(row, 4)
+            bind_item = table.item(row, 2)
             if bind_item is not None:
                 bind_item.setText(self.bindings.get(hwnd, ""))
         table.blockSignals(False)
@@ -1069,84 +1055,76 @@ class MainWindow(QMainWindow):
             return
         self._refresh_window_table(force=False)
 
-    def window_table_select_all(self):
-        self.window_table.selectAll()
+    def _selected_hwnd(self) -> int | None:
+        """单选模式：返回当前选中行的 hwnd，未选中返回 None"""
+        indexes = self.window_table.selectedIndexes()
+        if not indexes:
+            return None
+        item = self.window_table.item(indexes[0].row(), 0)
+        return int(item.data(Qt.ItemDataRole.UserRole)) if item is not None else None
 
-    def _clear_window_selection(self):
-        self.window_table.blockSignals(True)
-        self.window_table.clearSelection()
-        self.window_table.blockSignals(False)
-        self.selected_hwnds = []
-        self.settings["selected_servers"] = []
-        self._save_settings()
+    def _selected_hwnds(self) -> list[int]:
+        """兼容覆盖层等需要列表的调用：单选模式下最多一个元素"""
+        hwnd = self._selected_hwnd()
+        return [hwnd] if hwnd is not None else []
 
     def _on_window_selection_changed(self):
         self.selected_hwnds = self._selected_hwnds()
-        self._sync_overlays(sorted(set(self.selected_hwnds) | set(self.bindings)))
-        servers = self._servers_of(self.selected_hwnds)
-        self.settings["selected_servers"] = servers
+        self._sync_overlays(self.selected_hwnds)
+        controller = self._active_controller()
+        server = ""
+        if self.selected_hwnds and controller is not None:
+            status = controller.hwnd_status.get(self.selected_hwnds[0])
+            server = status.server if status else ""
+        self.settings["selected_server"] = server
         self._save_settings()
         self._update_window_label()
-
-    def _selected_hwnds(self) -> list[int]:
-        """从表格多行选择里取出 hwnd（按行序，去重）"""
-        table = self.window_table
-        hwnds = []
-        for row in sorted({index.row() for index in table.selectedIndexes()}):
-            item = table.item(row, 0)
-            if item is None:
-                continue
-            hwnd = int(item.data(Qt.ItemDataRole.UserRole))
-            if hwnd not in hwnds:
-                hwnds.append(hwnd)
-        return hwnds
-
-    def _servers_of(self, hwnds) -> list[str]:
-        controller = self._active_controller()
-        if controller is None:
-            return []
-        return [controller.hwnd_status[h].server for h in hwnds
-                if h in controller.hwnd_status]
-
-    def _bind_selected(self):
-        """把当前选中的队列绑定给勾选的 hwnd（先选队列、再绑定，然后才能执行）"""
-        if not self.selected_hwnds:
-            QMessageBox.information(self, "提示", "请先在窗口列表勾选要绑定的窗口")
-            return
-        if not self.active_queue:
-            QMessageBox.information(self, "提示", "请先在「执行队列」面板选择一个队列")
-            return
-        if not self._active_queue_items():
-            QMessageBox.information(self, "提示",
-                                    f"队列「{self.active_queue}」是空的，先从任务卡片「加入队列」")
-            return
-
-        for hwnd in self.selected_hwnds:
-            self.bindings[hwnd] = self.active_queue
-        self._refresh_bindings_column()
-        self._sync_overlays(list(self.bindings))
-        self._save_bindings()
-        self.btn_queue_run.setEnabled(bool(self._build_plan_items()))
-        self._update_window_label()
-        self._append_log(f"🔗 已把队列「{self.active_queue}」绑定给 {len(self.selected_hwnds)} 个窗口\n")
-
-    def _unbind_selected(self):
-        if not self.selected_hwnds:
-            return
-        for hwnd in self.selected_hwnds:
-            self.bindings.pop(hwnd, None)
-        self._refresh_bindings_column()
-        self._sync_overlays(list(self.bindings))
-        self._save_bindings()
-        self.btn_queue_run.setEnabled(bool(self._build_plan_items()))
-        self._update_window_label()
-        self._append_log("🔓 已解绑勾选的窗口\n")
+        self._update_run_button()
 
     def _update_window_label(self):
-        bound = len(self.bindings)
-        self.window_label.setText(
-            f"已绑定 {bound} 个窗口 · 选中 {len(self.selected_hwnds)} 个"
-            f"（选中后点「绑定队列」）")
+        hwnd = self.selected_hwnds[0] if self.selected_hwnds else None
+        if hwnd is None:
+            self.window_label.setText("选中一个窗口，选择队列后点「运行」")
+            return
+        bound_queue = self.bindings.get(hwnd, "未绑定")
+        self.window_label.setText(f"hwnd={hwnd} · 绑定队列：{bound_queue}")
+
+    def _run_selected(self):
+        """以 hwnd 为核心的执行入口：选中窗口 + 所选队列，点「运行」立即执行"""
+        if self._is_busy():
+            QMessageBox.information(self, "提示", "已有任务在运行，请先停止后再执行")
+            return
+        hwnd = self._selected_hwnd()
+        if hwnd is None:
+            QMessageBox.information(self, "提示", "请先在窗口列表选中一个窗口")
+            return
+        queue_name = self.combo_run_queue.currentText().strip()
+        if queue_name not in self.queues:
+            QMessageBox.information(self, "提示", "请先选择一个队列（没有就先在「执行队列」面板新建）")
+            return
+        tasks = [(item["key"], dict(item.get("params") or {}))
+                 for item in self.queues.get(queue_name, [])]
+        if not tasks:
+            QMessageBox.information(self, "提示",
+                                    f"队列「{queue_name}」是空的，先从任务卡片「加入队列」")
+            return
+
+        # 运行即绑定：该 hwnd 执行此队列；定时执行与边框显示复用这条绑定
+        self.bindings[hwnd] = queue_name
+        self._refresh_bindings_column()
+        self._save_bindings()
+
+        plan = [(hwnd, queue_name, tasks)]
+        self._append_log(f"\n▶ [{_now()}] 开始执行：hwnd={hwnd} → 队列「{queue_name}」×{len(tasks)}\n")
+        self._launch(plan)
+
+    def _update_run_button(self):
+        """有选中窗口且所选队列非空时，「运行」才可用"""
+        busy = self._is_busy()
+        hwnd = self._selected_hwnd()
+        queue_name = self.combo_run_queue.currentText().strip()
+        self.btn_run.setEnabled(
+            not busy and hwnd is not None and bool(self.queues.get(queue_name)))
 
     def _sync_overlays(self, hwnds):
         """给每个绑定窗口各挂一个边框覆盖层，未绑定的立即移除"""
@@ -1297,8 +1275,7 @@ class MainWindow(QMainWindow):
     # ---------- 窗口连接 ----------
 
     def _refresh_windows(self):
-        # 延迟导入：controller_cv 会连着 pyautogui 一起导入，而 pyautogui 在导入时
-        # 就会设置进程 DPI 感知，必须等 QApplication 把进程设成 v2 之后再导入
+        # 延迟导入：controller_cv 较重（加载图标等），必须等 QApplication 创建后再导入
         from shenwu.controller_cv import get_controller
 
         try:
@@ -1350,7 +1327,7 @@ class MainWindow(QMainWindow):
         return plan
 
     def _start_plan(self):
-        """执行：严格按 选择队列 -> 绑定 hwnd -> 执行 的顺序，每个 hwnd 跑自己的队列"""
+        """定时执行的入口：按各窗口已绑定的队列依次执行（手动运行走 _run_selected）"""
         if self._is_busy():
             QMessageBox.information(self, "提示", "已有任务在运行，请先停止后再执行")
             return
@@ -1358,7 +1335,7 @@ class MainWindow(QMainWindow):
         if not plan:
             QMessageBox.information(
                 self, "提示",
-                "还没有可执行的计划：先选好队列并把任务加进去，再到窗口列表绑定 hwnd")
+                "还没有可执行的计划：先在窗口面板选中窗口、选好队列点「运行」（运行即绑定）")
             return
 
         plan_desc = " | ".join(
@@ -1393,8 +1370,8 @@ class MainWindow(QMainWindow):
         # 运行期间暂停自动刷新，避免打断脚本
         self._auto_refresh_timer.stop()
         self._update_view(None)
-        self.btn_queue_run.setEnabled(False)
-        self.btn_queue_stop.setEnabled(True)
+        self.btn_run.setEnabled(False)
+        self.btn_stop.setEnabled(True)
         worker.start()
 
     def _on_stop(self, key: str | None = None):
@@ -1403,7 +1380,7 @@ class MainWindow(QMainWindow):
         self.worker.request_stop()
         self._stopping = True
         self._update_view(None, stopping=True)
-        self.btn_queue_stop.setEnabled(False)
+        self.btn_stop.setEnabled(False)
         self.statusBar().showMessage("正在停止…")
         self._append_log(f"⏹ [{_now()}] 已请求停止，等待当前操作结束（剩余任务不再执行）…\n")
 
@@ -1420,6 +1397,8 @@ class MainWindow(QMainWindow):
         server = controller.hwnd_status[hwnd].server if controller else str(hwnd)
         self.statusBar().showMessage(f"正在执行：hwnd={hwnd}（{server}）· 队列「{queue_name}」")
         self._append_log(f"🎯 [{_now()}] 窗口 hwnd={hwnd}（{server}）开始执行队列「{queue_name}」\n")
+        # 边框跟随正在执行的窗口（定时执行时选中的窗口可能不是它）
+        self._sync_overlays([hwnd])
 
     def _on_task_started(self, index: int, key: str):
         self._current_index = index
@@ -1457,12 +1436,13 @@ class MainWindow(QMainWindow):
         self._active_task = ""
         self._active_hwnd = None
         self._update_view(None)
-        self.btn_queue_run.setEnabled(bool(self._build_plan_items()))
-        self.btn_queue_stop.setEnabled(False)
+        self._update_run_button()
+        self.btn_stop.setEnabled(False)
         self.queue_progress.setText("")
-        # 空闲了再恢复自动刷新
+        # 空闲了再恢复自动刷新，边框回到当前选中的窗口
         if self.chk_auto_refresh.isChecked():
             self._auto_refresh_timer.start()
+        self._sync_overlays(self.selected_hwnds)
 
         if not ok and message and message != self._last_error:
             self._append_log(f"❌ [{_now()}] 执行失败：\n{message}\n")
@@ -1718,12 +1698,6 @@ def _parse_time(text: str):
         return QTime(int(hour), int(minute))
     except Exception:
         return QTime(12, 0)
-
-
-def _is_dark(color_rgb) -> bool:
-    """颜色深浅：决定色块上的文字用白还是黑"""
-    r, g, b = color_rgb
-    return (r * 299 + g * 587 + b * 114) / 1000 < 128
 
 
 def _fmt_params(params: dict | None) -> str:

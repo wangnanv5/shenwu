@@ -425,6 +425,21 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(150, self._refresh_windows)
         QTimer.singleShot(300, self._refresh_window_table)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._reflow_cards()
+
+    def _reflow_cards(self):
+        """响应式：按窗口宽度自适应任务卡片的列数（每列约 280px，1~4 列）"""
+        if not hasattr(self, "_cards_grid"):
+            return
+        cols = max(1, min(GRID_COLUMNS, (self.width() - 70) // 280))
+        if cols == self._grid_cols:
+            return
+        self._grid_cols = cols
+        for index, key in enumerate(self._card_order):
+            self._cards_grid.addWidget(self.cards[key], index // cols, index % cols)
+
     # ---------- 配置持久化 ----------
 
     def _restore_settings(self):
@@ -838,12 +853,15 @@ class MainWindow(QMainWindow):
 
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(14)
+        grid.setSpacing(12)
 
-        for index, spec in enumerate(TASKS):
-            card = TaskCard(spec)
+        self._cards_grid = grid
+        self._card_order = [spec.key for spec in TASKS]
+        self._grid_cols = GRID_COLUMNS
+        for index, key in enumerate(self._card_order):
+            card = TaskCard(next(s for s in TASKS if s.key == key))
             card.add_to_queue.connect(self._on_card_add)
-            self.cards[spec.key] = card
+            self.cards[key] = card
             grid.addWidget(card, index // GRID_COLUMNS, index % GRID_COLUMNS)
 
         outer.addLayout(grid)
@@ -913,13 +931,20 @@ class MainWindow(QMainWindow):
         self.window_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.window_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.window_table.verticalHeader().setVisible(False)
+        # 行高基准：默认行高小于嵌入按钮的 sizeHint（DPI 缩放下更明显），
+        # 按钮会被竖直压瘪；显式抬高行高下限并让行随内容自适应
+        self.window_table.verticalHeader().setDefaultSectionSize(36)
+        self.window_table.verticalHeader().setMinimumSectionSize(32)
         self.window_table.setFixedHeight(180)
         self.window_table.itemSelectionChanged.connect(self._on_window_selection_changed)
 
         header = self.window_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        # 「操作」列固定宽度：ResizeToContents 按单元格文本算宽，嵌入的按钮
+        # 控件不参与计算，空间不足时列会被压到按钮不可见；固定宽度杜绝挤压
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.window_table.setColumnWidth(2, 88)
 
         box = QVBoxLayout(frame)
         box.setContentsMargins(16, 14, 16, 14)
@@ -967,16 +992,25 @@ class MainWindow(QMainWindow):
             table.setItem(row, 1, QTableWidgetItem(self.bindings.get(hwnd, "")))
 
             # 「定位」按钮：点击给目标窗口挂临时边框标识，再点提前收起
+            # 定高 26px + 居中容器：行高无论如何变化，按钮竖直方向不变形
             btn = QPushButton("收起" if hwnd in self._identify_overlays else "定位")
             btn.setToolTip(f"在屏幕上高亮标识 hwnd={hwnd} 对应的窗口（5 秒自动消失）")
+            btn.setMinimumWidth(72)
+            btn.setFixedHeight(26)
             btn.clicked.connect(lambda _=False, h=hwnd: self._identify_hwnd(h))
-            table.setCellWidget(row, 2, btn)
+            cell = QWidget()
+            cell_layout = QHBoxLayout(cell)
+            cell_layout.setContentsMargins(4, 3, 4, 3)
+            cell_layout.addWidget(btn)
+            table.setCellWidget(row, 2, cell)
             self._identify_buttons[hwnd] = btn
 
             # 上次保存的服务器名 → 恢复选中行（仅内部使用，不在表格显示）
             if server and server == saved_server:
                 table.selectRow(row)
 
+        # 行高随内容（含嵌入按钮容器）自适应，杜绝竖直挤压
+        table.resizeRowsToContents()
         table.blockSignals(False)
         self.selected_hwnds = self._selected_hwnds()
         self._update_window_label()

@@ -139,7 +139,7 @@ class GameController:
         print(f"初始化成功,找到{len(self.hwnd_list)}个游戏窗口")
         self.set_radio(self.hwnd_list[0])
 
-        print(self.hwnd_list)
+        # print(self.hwnd_list)
         self.resource = GameResource()
         # self.hwnd_list = self.hwnd_list[0]
         # YOLO 检测器：模型文件缺失时只警告不拦截启动（self.yolo = None），

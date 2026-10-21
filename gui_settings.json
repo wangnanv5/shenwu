@@ -1,21 +1,5 @@
 {
   "queues": {
-    "修业": [
-      {
-        "key": "qu_mo",
-        "params": {}
-      },
-      {
-        "key": "xiu_ye",
-        "params": {}
-      }
-    ],
-    "修炼": [
-      {
-        "key": "xiu_lian",
-        "params": {}
-      }
-    ],
     "日常": [
       {
         "key": "xiu_ye",
@@ -25,17 +9,20 @@
         "key": "xiu_lian",
         "params": {}
       }
+    ],
+    "修炼": [
+      {
+        "key": "xiu_lian",
+        "params": {}
+      }
     ]
   },
   "bindings": {
-    "三生万物": "日常"
+    "三生万物": "修炼"
   },
-  "active_queue": "日常",
+  "active_queue": "修炼",
   "show_dev_tools": false,
   "params": {
-    "auto_reset_round": {
-      "is_hide": false
-    },
     "auto_task": {
       "task_name": "法宝引导"
     },
@@ -48,9 +35,7 @@
     }
   },
   "ocr_history": [],
-  "selected_servers": [
-    "三生万物"
-  ],
+  "selected_servers": [],
   "auto_scroll": true,
   "auto_refresh": true,
   "loop": {

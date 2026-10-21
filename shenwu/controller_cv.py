@@ -818,8 +818,8 @@ class GameController:
                             break
                     print("给予物品成功")
                     # 确保关闭了对话
-                    self.close_talk(region, lead=0.5)
-
+                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
+                                                        action=lambda: self.close_talk(region))
                 # 宠物
                 elif task_type == XiuYeTaskType.CHONG_WU:
                     print("开始修业宠物任务")
@@ -844,8 +844,8 @@ class GameController:
                                     action=lambda: windows_click(hwnd, xiu_ye_x, xiu_ye_y))
 
                     # 确保关闭了对话
-                    self.close_talk(region, lead=0.1, gap=0.1)
-
+                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
+                                        action=lambda: self.close_talk(region))
                 # 战斗
                 elif task_type in (XiuYeTaskType.TIAO_ZHAN, XiuYeTaskType.TIAO_ZHAN_SHOU_XI,XiuYeTaskType.TONG_MEN):
                     print("开始修业战斗任务")
@@ -857,14 +857,15 @@ class GameController:
                         human_delay(3)
 
                     self.wait_until(region, self.is_in_fight,action=click_task_and_wait, action_first=True)
-                    human_delay(0.2)
+                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
+                                        action=lambda: self.close_talk(region))                    
                     self.reset_round(hwnd_index)
 
                     self.wait_until(region, self.is_in_fight, want=False, lead=0.1)
                     human_delay(0.2)
 
-                    self.close_talk(region, lead=0.1, gap=0.1)
-
+                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
+                                        action=lambda: self.close_talk(region))
                 elif task_type == XiuYeTaskType.LIE_HEN:
                     print("开始修业裂痕任务")
 
@@ -875,14 +876,16 @@ class GameController:
 
                     # 第一次封印,封印结束出现对话框
                     self.wait_until(region, self.is_in_fight,action=click_task_and_wait, action_first=True)
-                    human_delay(1)
+                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
+                                    action=lambda: self.close_talk(region))
+                    
                     self.reset_round(hwnd_index)
 
                     self.wait_until(region, self.is_in_fight, want=False, lead=2)
                     human_delay(0.2)
 
-                    self.close_talk(region, lead=1, gap=1)
-
+                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
+                                        action=lambda: self.close_talk(region))
                 else:
                     print("❌ 未知任务类型")
             except Exception:
@@ -1013,7 +1016,8 @@ class GameController:
                     print("修炼任务给予物品成功")
 
                     # 确保关闭了对话
-                    self.close_talk(region, lead=1)
+                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
+                                        action=lambda: self.close_talk(region))                    
                     continue
 
                 frame = self.grab_frame(region, "raw")
@@ -1034,7 +1038,8 @@ class GameController:
                     self.wait_until(region, self.is_has_xun_lu, want=False, lead=0.1)
 
                     # 确保关闭了对话
-                    self.close_talk(region, lead=1)
+                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
+                                        action=lambda: self.close_talk(region))                    
                     print("✅ 修炼任务关闭对话框成功")
 
                 # 找疯道人
@@ -1052,7 +1057,8 @@ class GameController:
                     self.wait_until(region, self.is_in_fight, want=False, lead=2)
                     print("修炼任务结束战斗")
 
-                    self.close_talk(region, lead=1, gap=1)
+                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
+                                        action=lambda: self.close_talk(region))                    
                     print("修炼任务关闭对话框成功")
                     self.hwnd_status[hwnd].is_finish_xiu_lian = True
 

@@ -49,13 +49,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-import win32gui
-
 from shenwu.gui import settings
 from shenwu.gui.theme import QSS
 from shenwu.gui.workers import TaskWorker
 
-GRID_COLUMNS = 3
+GRID_COLUMNS = 4
 
 # 紧急停止热键：Ctrl + Alt + Q（脚本运行时游戏窗口会盖住界面，用它兜底）
 EMERGENCY_MODIFIERS = (0x11, 0x12)  # VK_CONTROL / VK_MENU(Alt)
@@ -102,17 +100,6 @@ TASKS: tuple[TaskSpec, ...] = (
     ),
     TaskSpec(
         "xiu_lian", "修炼", "寻物 / 找人 / 疯道人，未接任务时从日历寻路",
-    ),
-    TaskSpec(
-        "fish", "钓鱼", "抛竿并等待上钩",
-        tip="钓到一条后自动结束",
-    ),
-    TaskSpec(
-        "auto_reset_round", "自动重置回合", "持续重置该窗口的战斗回合",
-        params=(Param("is_hide", "操作后隐藏窗口", "check"),),
-    ),
-    TaskSpec(
-        "qu_mo", "检查驱魔", "不在驱魔状态时自动开背包使用驱魔香",
     ),
     TaskSpec(
         "auto_task", "OCR 自动任务", "OCR 识别屏幕上的任务名并点击",
@@ -162,28 +149,20 @@ class TaskCard(QFrame):
         self.setProperty("state", "idle")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 14, 16, 14)
-        root.setSpacing(8)
+        root.setContentsMargins(10, 8, 10, 8)
+        root.setSpacing(6)
 
-        # 标题 + 队列计数 + 状态点
+        # 标题 + 队列计数
         head = QHBoxLayout()
-        head.setSpacing(8)
+        head.setSpacing(6)
         title = QLabel(spec.title)
         title.setObjectName("cardTitle")
         self.queue_badge = QLabel("")
         self.queue_badge.setObjectName("queueBadge")
-        self.dot = QLabel("●")
-        self.dot.setObjectName("dot")
         head.addWidget(title)
         head.addWidget(self.queue_badge)
         head.addStretch(1)
-        head.addWidget(self.dot)
         root.addLayout(head)
-
-        desc = QLabel(spec.desc)
-        desc.setObjectName("cardDesc")
-        desc.setWordWrap(True)
-        root.addWidget(desc)
 
         for param in spec.params:
             row = QHBoxLayout()
@@ -304,14 +283,12 @@ class TaskCard(QFrame):
 
         self.setProperty("state", state)
         self.setProperty("locked", False)
-        self.dot.setProperty("state", "running" if busy else "idle")
         self.btn_add.setEnabled(not busy)
 
         for widget in self.widgets.values():
             widget.setEnabled(not busy)
 
         _repolish(self)
-        _repolish(self.dot)
 
     def set_locked(self, locked: bool):
         """有任务在跑时锁住所有卡片（队列正在执行，参数暂不能改）"""
@@ -386,14 +363,8 @@ class MainWindow(QMainWindow):
         self.active_queue: str = ""
         self.bindings: dict[int, str] = {}
 
-        # 多选（用于绑定）+ 每个绑定窗口一个边框覆盖层
+        # 当前选中的窗口（单选）
         self.selected_hwnds: list[int] = []
-        self._overlays: dict[int, object] = {}
-        self._hwnd_colors: dict[int, tuple[int, int, int]] = {}  # hwnd -> 唯一渲染颜色
-        self._border_timer = QTimer(self)
-        self._border_timer.setInterval(30)
-        self._border_timer.timeout.connect(self._pump_border)
-        self._border_labels: dict[int, str] = {}  # hwnd -> 当前边框文字，避免重复重绘
 
         # 当前任务名（显示在窗口边框上）/ 正在处理的窗口
         self._active_task = ""
@@ -419,8 +390,8 @@ class MainWindow(QMainWindow):
         self._schedule_timer.timeout.connect(self._run_pending_schedule)
 
         self.setWindowTitle("幻唐志 · 脚本控制台")
-        self.resize(1020, 820)
-        self.setMinimumSize(900, 700)
+        self.resize(1020, 960)
+        self.setMinimumSize(900, 820)
 
         self.log_text.connect(self._append_log)
 
@@ -790,7 +761,6 @@ class MainWindow(QMainWindow):
         self._save_bindings()
         self._refresh_queue_panel()
         self._refresh_bindings_column()
-        self._sync_overlays(list(self.bindings))
         self._append_log(f"🗑 已删除队列「{name}」\n")
 
     def _on_card_add(self, key: str):
@@ -922,22 +892,19 @@ class MainWindow(QMainWindow):
         head.addWidget(self.btn_run)
         head.addWidget(self.btn_stop)
 
-        self.window_table = QTableWidget(0, 4)
+        self.window_table = QTableWidget(0, 2)
         self.window_table.setObjectName("windowTable")
-        self.window_table.setHorizontalHeaderLabels(
-            ("HWND", "服务器", "绑定队列", "任务状态"))
+        self.window_table.setHorizontalHeaderLabels(("HWND", "绑定队列"))
         self.window_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.window_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.window_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.window_table.verticalHeader().setVisible(False)
-        self.window_table.setFixedHeight(200)
+        self.window_table.setFixedHeight(180)
         self.window_table.itemSelectionChanged.connect(self._on_window_selection_changed)
 
         header = self.window_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
 
         box = QVBoxLayout(frame)
         box.setContentsMargins(16, 14, 16, 14)
@@ -953,27 +920,20 @@ class MainWindow(QMainWindow):
 
         force=False 时（自动刷新）窗口集合没变化就不重建表格，也不打日志，避免刷屏。
         """
-        # 延迟导入：controller_cv / windows_utils 会在导入时触碰进程 DPI 感知，
-        # 必须晚于 QApplication 创建（见 run_gui 的说明）
+        # 延迟导入：controller_cv 较重（加载图标等），必须晚于 QApplication 创建
         from shenwu.controller_cv import get_controller
-        from shenwu.windows_utils import assign_colors
 
         try:
             controller = get_controller()
             infos = sorted(controller.window_infos(), key=lambda item: item[1])
-            statuses = {hwnd: controller.hwnd_status[hwnd] for _, hwnd, _, _ in infos}
         except Exception as e:
             self._append_log(f"❌ 获取已连接窗口失败：{e}\n")
             return
 
         hwnds = [item[1] for item in infos]
         if not force and hwnds == self._listed_hwnds:
-            self._update_status_column(statuses)
             return
         self._listed_hwnds = hwnds
-
-        # 每个 hwnd 一个唯一颜色（边框覆盖层用，不在表格显示）
-        self._hwnd_colors = assign_colors(hwnds, self._hwnd_colors)
 
         # 窗口集合变化时：清理失效绑定，按保存的 服务器名->队列 恢复
         self._rebind_from_settings(controller)
@@ -988,17 +948,14 @@ class MainWindow(QMainWindow):
             hwnd_item.setData(Qt.ItemDataRole.UserRole, hwnd)
             table.setItem(row, 0, hwnd_item)
 
-            table.setItem(row, 1, QTableWidgetItem(server or "-"))
-            table.setItem(row, 2, QTableWidgetItem(self.bindings.get(hwnd, "")))
-            table.setItem(row, 3, QTableWidgetItem(_status_text(statuses.get(hwnd))))
+            table.setItem(row, 1, QTableWidgetItem(self.bindings.get(hwnd, "")))
 
-            # 上次保存的服务器名 → 恢复选中行
+            # 上次保存的服务器名 → 恢复选中行（仅内部使用，不在表格显示）
             if server and server == saved_server:
                 table.selectRow(row)
 
         table.blockSignals(False)
         self.selected_hwnds = self._selected_hwnds()
-        self._sync_overlays(self.selected_hwnds)
         self._update_window_label()
         self._update_run_button()
         if force:
@@ -1015,20 +972,6 @@ class MainWindow(QMainWindow):
                 resolved[hwnd] = queue_name
         self.bindings = resolved
 
-    def _update_status_column(self, statuses):
-        """自动刷新时只更新「任务状态」列，不动选择、不重建表格"""
-        table = self.window_table
-        table.blockSignals(True)
-        for row in range(table.rowCount()):
-            item = table.item(row, 0)
-            if item is None:
-                continue
-            hwnd = int(item.data(Qt.ItemDataRole.UserRole))
-            status_item = table.item(row, 3)
-            if status_item is not None:
-                status_item.setText(_status_text(statuses.get(hwnd)))
-        table.blockSignals(False)
-
     def _refresh_bindings_column(self):
         table = self.window_table
         table.blockSignals(True)
@@ -1037,7 +980,7 @@ class MainWindow(QMainWindow):
             if item is None:
                 continue
             hwnd = int(item.data(Qt.ItemDataRole.UserRole))
-            bind_item = table.item(row, 2)
+            bind_item = table.item(row, 1)
             if bind_item is not None:
                 bind_item.setText(self.bindings.get(hwnd, ""))
         table.blockSignals(False)
@@ -1070,7 +1013,6 @@ class MainWindow(QMainWindow):
 
     def _on_window_selection_changed(self):
         self.selected_hwnds = self._selected_hwnds()
-        self._sync_overlays(self.selected_hwnds)
         controller = self._active_controller()
         server = ""
         if self.selected_hwnds and controller is not None:
@@ -1126,77 +1068,6 @@ class MainWindow(QMainWindow):
         self.btn_run.setEnabled(
             not busy and hwnd is not None and bool(self.queues.get(queue_name)))
 
-    def _sync_overlays(self, hwnds):
-        """给每个绑定窗口各挂一个边框覆盖层，未绑定的立即移除"""
-        from shenwu.windows_utils import Win32BorderWithLabel, get_render_color
-
-        wanted = set(hwnds)
-
-        def get_color(hwnd):
-            return self._hwnd_colors.get(hwnd) or get_render_color(hwnd, is_game_window=True)
-
-        for hwnd in list(self._overlays):
-            if hwnd not in wanted:
-                self._close_overlay(hwnd)
-
-        for hwnd in hwnds:
-            if hwnd in self._overlays:
-                continue
-            try:
-                overlay = Win32BorderWithLabel(
-                    hwnd,
-                    label_text=f"⚡ {self.bindings.get(hwnd, '队列目标')} [HWND: {hwnd}]",
-                    border_width=6,
-                    color_rgb=get_color(hwnd),
-                )
-            except Exception as e:
-                self._append_log(f"❌ 绘制边框失败 hwnd={hwnd}：{e}\n")
-                continue
-            self._overlays[hwnd] = overlay
-            self._border_labels[hwnd] = overlay.label_text
-            self._append_log(f"🖍 已为 hwnd={hwnd} 绘制边框\n")
-
-        if self._overlays:
-            self._border_timer.start()
-        else:
-            self._border_timer.stop()
-
-    def _close_overlay(self, hwnd):
-        overlay = self._overlays.pop(hwnd, None)
-        self._border_labels.pop(hwnd, None)
-        if overlay is None:
-            return
-        try:
-            overlay.close()
-        except Exception:
-            pass
-
-    def _close_borders(self):
-        for hwnd in list(self._overlays):
-            self._close_overlay(hwnd)
-        self._border_timer.stop()
-
-    def _pump_border(self):
-        """Qt 定时器里驱动所有覆盖层跟随各自窗口（替代 windows_utils 里的 while 循环）"""
-        if not self._overlays:
-            self._border_timer.stop()
-            return
-        for hwnd in list(self._overlays):
-            overlay = self._overlays.get(hwnd)
-            if overlay is None:
-                continue
-            try:
-                alive = overlay.update_position()
-                win32gui.PumpWaitingMessages()
-            except Exception as e:
-                self._append_log(f"⚠️ 边框跟随中断 hwnd={hwnd}：{e}\n")
-                alive = False
-            if not alive:
-                self._append_log(f"⚠️ 窗口 {hwnd} 已关闭，边框已移除\n")
-                self._close_overlay(hwnd)
-                continue
-            self._update_overlay_text(hwnd, overlay)
-
     def _active_controller(self):
         """拿到已构造好的 controller；还没连接过就返回 None（不触发构造）"""
         try:
@@ -1207,21 +1078,6 @@ class MainWindow(QMainWindow):
             return get_controller()
         except Exception:
             return None
-
-    def _update_overlay_text(self, hwnd, overlay):
-        """正在处理的窗口显示 ▶ 当前任务，其余显示 ⚡ 绑定队列（变化时才重绘）"""
-        controller = self._active_controller()
-        active = getattr(controller, "current_hwnd", None)
-        if hwnd == active:
-            text = f"▶ {self._active_task or '正在执行'}"
-        else:
-            text = f"⚡ {self.bindings.get(hwnd, '队列目标')}"
-        if self._border_labels.get(hwnd) != text:
-            self._border_labels[hwnd] = text
-            try:
-                overlay.set_text(text)
-            except Exception:
-                pass
 
     def _build_log_area(self) -> QWidget:
         label = QLabel("运行日志")
@@ -1288,7 +1144,7 @@ class MainWindow(QMainWindow):
 
         if count == 0:
             self._set_pill("err", "未找到游戏窗口")
-            self._append_log("❌ 未枚举到标题为「幻唐志 - 服务器名」的游戏窗口\n")
+            self._append_log("❌ 未枚举到《幻唐志》游戏窗口\n")
             return
 
         # 图标列表要等 controller 就绪才有，这里补进诊断卡片的下拉框
@@ -1302,8 +1158,8 @@ class MainWindow(QMainWindow):
         infos = controller.window_infos()
         self._set_pill("ok", f"已连接 {count} 个窗口 · 缩放 {controller.radio:.2f}")
         self._append_log(f"✅ 已连接 {count} 个游戏窗口，缩放比例 {controller.radio:.2f}\n")
-        for index, hwnd, title, server in infos:
-            self._append_log(f"   {index + 1}. {title}（服务器：{server} · hwnd={hwnd}）\n")
+        for index, hwnd, _title, _server in infos:
+            self._append_log(f"   {index + 1}. hwnd={hwnd}\n")
 
     def _set_pill(self, state: str, text: str):
         self.pill.setText(text)
@@ -1393,12 +1249,8 @@ class MainWindow(QMainWindow):
 
     def _on_hwnd_started(self, hwnd: int, queue_name: str):
         self._active_hwnd = hwnd
-        controller = self._active_controller()
-        server = controller.hwnd_status[hwnd].server if controller else str(hwnd)
-        self.statusBar().showMessage(f"正在执行：hwnd={hwnd}（{server}）· 队列「{queue_name}」")
-        self._append_log(f"🎯 [{_now()}] 窗口 hwnd={hwnd}（{server}）开始执行队列「{queue_name}」\n")
-        # 边框跟随正在执行的窗口（定时执行时选中的窗口可能不是它）
-        self._sync_overlays([hwnd])
+        self.statusBar().showMessage(f"正在执行：hwnd={hwnd} · 队列「{queue_name}」")
+        self._append_log(f"🎯 [{_now()}] 窗口 hwnd={hwnd} 开始执行队列「{queue_name}」\n")
 
     def _on_task_started(self, index: int, key: str):
         self._current_index = index
@@ -1439,10 +1291,9 @@ class MainWindow(QMainWindow):
         self._update_run_button()
         self.btn_stop.setEnabled(False)
         self.queue_progress.setText("")
-        # 空闲了再恢复自动刷新，边框回到当前选中的窗口
+        # 空闲了再恢复自动刷新
         if self.chk_auto_refresh.isChecked():
             self._auto_refresh_timer.start()
-        self._sync_overlays(self.selected_hwnds)
 
         if not ok and message and message != self._last_error:
             self._append_log(f"❌ [{_now()}] 执行失败：\n{message}\n")
@@ -1661,7 +1512,6 @@ class MainWindow(QMainWindow):
                 return
             self.worker.request_stop()
             self.worker.wait(10000)
-        self._close_borders()
         self._save_settings()
         if getattr(self, "tray", None) is not None:
             self.tray.hide()
@@ -1670,23 +1520,6 @@ class MainWindow(QMainWindow):
 
 def _now() -> str:
     return time.strftime("%H:%M:%S")
-
-
-def _status_text(status) -> str:
-    """把窗口的 is_finish_* 标记转成「巡游✓ 修业✗ 修炼✗」"""
-    if status is None:
-        return "-"
-
-    def flag(name: str) -> bool:
-        try:
-            return bool(status.get(name, False))
-        except Exception:
-            return bool(getattr(status, name, False))
-
-    marks = (("巡游", flag("is_finish_xun_you")),
-             ("修业", flag("is_finish_xiu_ye")),
-             ("修炼", flag("is_finish_xiu_lian")))
-    return "  ".join(f"{name}{'✓' if done else '✗'}" for name, done in marks)
 
 
 def _parse_time(text: str):

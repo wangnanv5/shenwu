@@ -154,18 +154,6 @@ class TaskWorker(QThread):
             controller.reset_finish_status("xiu_lian")
             controller.run_xiu_lian(stop_event=self.stop_event)
 
-        elif key == "fish":
-            controller.run_fish(stop_event=self.stop_event)
-
-        elif key == "auto_reset_round":
-            controller.run_auto_reset_round(
-                is_hide=bool(params.get("is_hide", False)),
-                stop_event=self.stop_event,
-            )
-
-        elif key == "qu_mo":
-            controller.check_qu_mo()
-
         elif key == "auto_task":
             task_name = str(params.get("task_name", "")).strip()
             if not task_name:

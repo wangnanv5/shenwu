@@ -1,6 +1,7 @@
 import functools
 import os
 import re
+import threading
 import time
 from enum import Enum, auto
 
@@ -531,25 +532,72 @@ class GameController:
 
     # 重置回合并确保自动战斗开启
     def reset_round(self, hwnd_index=0):
-        hwnd = self.hwnd_list[hwnd_index]
         try:
-            region = make_region(hwnd)
-            frame = self.grab_frame(region, "gray")
-            match = self.find(frame, self.resource.zi_dong_icon)
-            if match is None:
-                return False
-            self.click_match(match, region)
-            frame = self.grab_frame(region, "gray")
-            match = self.find(frame, self.resource.zi_dong_small_icon)
-            if match is None:
-                return False
-            self.click_match(match, region)
-            return True
+            return self._reset_round_hwnd(self.hwnd_list[hwnd_index])
         except Exception:
             traceback.print_exc()
             return False
 
+    def _reset_round_hwnd(self, hwnd):
+        """按 hwnd 重置回合（消息级点击「自动」按钮）。
+
+        纯消息级、只读写自己 hwnd 的状态，线程安全，可多窗口并行调用。
+        """
+        region = make_region(hwnd)
+        frame = self.grab_frame(region, "gray")
+        match = self.find(frame, self.resource.zi_dong_icon)
+        if match is None:
+            return False
+        self.click_match(match, region)
+        frame = self.grab_frame(region, "gray")
+        match = self.find(frame, self.resource.zi_dong_small_icon)
+        if match is None:
+            return False
+        self.click_match(match, region)
+        return True
+
     # ---------- 业务流程 ----------
+
+    def _run_for_all(self, stop_event, runner, task_name, finish_key):
+        """run_all=True 的公共实现：所有窗口各起一个线程并行执行 runner
+
+        并发安全说明：
+        - 鼠标/键盘输入全部是消息级 PostMessage（按 hwnd 定向投递），各窗口
+          互不抢占真实光标与键盘状态，可同时进行；
+        - 每线程只写自己 hwnd 的 hwnd_status / window_fail_counts，无共享争用；
+        - WGC 截图每次调用独立会话，按窗口各自捕获；
+        - 停止：request_stop 置位的 terminate_event 会让各线程的 human_delay
+          立即抛 TaskTerminated，线程自行退出；全部结束后检测到终止标记则
+          重新抛出，保持「终止后不再执行后续任务」的原有语义。
+        """
+        if not self.hwnd_list:
+            print(f"❌ 未找到游戏窗口，{task_name}任务无法执行")
+            return
+
+        threads = []
+        for hwnd_index, hwnd in enumerate(self.hwnd_list):
+            status = self.hwnd_status.get(hwnd)
+            if status is not None and getattr(status, finish_key, False):
+                print(f"⏭ hwnd={hwnd} 的{task_name}任务已完成，跳过")
+                continue
+            threads.append(threading.Thread(
+                target=runner, args=(hwnd_index, stop_event, False),
+                name=f"{task_name}-hwnd{hwnd}", daemon=True))
+        if not threads:
+            print(f"🏁 {task_name}任务所有窗口均已完成")
+            return
+
+        print(f"📋 {task_name}任务开始并行执行（共 {len(threads)} 个窗口）")
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # 各窗口线程把「终止」吞在了自己体内（TaskTerminated 绕过 except
+        # Exception 但终止于线程边界），这里重新抛出交给上层（GUI TaskWorker）
+        if terminate_event.is_set():
+            raise TaskTerminated("用户请求终止")
+        print(f"🏁 {task_name}任务全部窗口处理完毕")
 
     def run_auto_reset_round(self,is_hide=False,stop_event=None):
         print("开始自动重置")
@@ -566,64 +614,63 @@ class GameController:
                     win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
                 human_delay(5)
 
-    def run_xun_you(self,stop_event=None):
-        failed_hwnds = []
+    def run_xun_you(self, hwnd_index=0, stop_event=None, run_all=False):
+        """巡游任务（单窗口版，按 hwnd_index 定位目标窗口，与 run_xiu_ye 等一致）。
+
+        :param hwnd_index: 目标窗口在 hwnd_list 中的下标，越界抛 IndexError
+        :param run_all: True 时忽略 hwnd_index，按 hwnd_list 顺序逐窗口执行
+        """
+        if run_all:
+            self._run_for_all(stop_event, self.run_xun_you, "巡游", "is_finish_xun_you")
+            return
+        if not 0 <= hwnd_index < len(self.hwnd_list):
+            raise IndexError(
+                f"hwnd_index={hwnd_index} 超出范围，当前游戏窗口数: {len(self.hwnd_list)}")
+        hwnd = self.hwnd_list[hwnd_index]
+
         while True:
             if is_stopped(stop_event):
                 break
-            if all(self.hwnd_status[h].is_finish_xun_you for h in self.hwnd_list):
-                if failed_hwnds:
-                    print(f"⚠️ 巡游任务跳过 {len(failed_hwnds)} 个窗口：{failed_hwnds}")
+            if self.hwnd_status[hwnd].is_finish_xun_you:
+                print("巡游任务完成")
                 break
 
-            for hwnd in self.hwnd_list:
-                if is_stopped(stop_event):
-                    break
-                if self.hwnd_status[hwnd].is_finish_xun_you:
+            self.current_hwnd = hwnd
+            try:
+                region = make_region(hwnd)
+                frame = self.grab_frame(region)
+
+                # 战斗中：重置回合确保自动战斗，等一轮再查
+                if self.is_in_fight(frame):
+                    human_delay(10)
                     continue
 
-                self.current_hwnd = hwnd
-                try:
-                    restore_window(hwnd)
-                    hotkey('ctrl', 'a', hwnd=hwnd)
+                finish_match = self.find(frame, self.resource.xun_you_finish_icon)
+                if finish_match is not None:
+                    self.hwnd_status[hwnd].is_finish_xun_you = True
+                    self.click_match(finish_match, region, delay=1)
                     human_delay(1)
-
-                    region = make_region(hwnd)
-
-                    # 点击对话框，进入战斗
-                    frame = self.grab_frame(region)
-
-                    if self.is_in_fight(frame):
-                        human_delay(5)
-                        continue
-
-                    finish_match = self.find(frame, self.resource.xun_you_finish_icon)
-
-                    if finish_match is not None:
-                        self.hwnd_status[hwnd].is_finish_xun_you = True
-                        self.click_match(finish_match, region, delay=1)
-                        human_delay(5)
-
-                    else:
-                        match = self.find(frame, self.resource.xun_you_start_fight_icon)
-
-                        if match is None:
-                            print("模式匹配结果为空")
-                            continue
-
-                        self.click_match(match, region, delay=1)
-                        human_delay(5)
                     continue
-                except Exception:
-                    count = self.window_fail_counts.get(hwnd, 0) + 1
-                    self.window_fail_counts[hwnd] = count
-                    print(f"❌ 巡游任务出错 hwnd={hwnd}（第 {count} 次）")
-                    traceback.print_exc()
-                    if count >= MAX_WINDOW_FAILS:
-                        print(f"⚠️ hwnd={hwnd} 连续失败 {count} 次，跳过该窗口")
-                        self.hwnd_status[hwnd].is_finish_xun_you = True
-                        failed_hwnds.append(hwnd)
+
+                match = self.find(frame, self.resource.xun_you_start_fight_icon)
+                if match is None:
+                    print("模式匹配结果为空")
                     human_delay(5)
+                    continue
+
+                self.click_match(match, region, delay=1)
+                human_delay(3)
+                self.reset_round(hwnd_index)
+
+            except Exception:
+                count = self.window_fail_counts.get(hwnd, 0) + 1
+                self.window_fail_counts[hwnd] = count
+                print(f"❌ 巡游任务出错 hwnd={hwnd}（第 {count} 次）")
+                traceback.print_exc()
+                if count >= MAX_WINDOW_FAILS:
+                    print(f"⚠️ hwnd={hwnd} 连续失败 {count} 次，标记任务完成")
+                    self.hwnd_status[hwnd].is_finish_xun_you = True
+                human_delay(5)
 
     def run_fish(self,stop_event=None):
         win32gui.EnumWindows(self.get_hwnd, None)
@@ -703,14 +750,18 @@ class GameController:
             print(f"⚠️ OCR 任务在 {len(failed_hwnds)} 个窗口上失败：{failed_hwnds}")
 
     # 修业任务
-    def run_xiu_ye(self, hwnd_index=0, stop_event=None):
+    def run_xiu_ye(self, hwnd_index=0, stop_event=None, run_all=False):
         """修业任务（单窗口版，按 hwnd_index 定位目标窗口，与 bao_ta 风格一致）。
 
         GUI 的 TaskWorker 本就逐窗口执行（set_selected_hwnds 后 hwnd_list
         只含目标窗口，index=0 即命中）；命令行直接指定窗口下标。
 
         :param hwnd_index: 目标窗口在 hwnd_list 中的下标，越界抛 IndexError
+        :param run_all: True 时忽略 hwnd_index，按 hwnd_list 顺序逐窗口执行
         """
+        if run_all:
+            self._run_for_all(stop_event, self.run_xiu_ye, "修业", "is_finish_xiu_ye")
+            return
         if not 0 <= hwnd_index < len(self.hwnd_list):
             raise IndexError(
                 f"hwnd_index={hwnd_index} 超出范围，当前游戏窗口数: {len(self.hwnd_list)}")
@@ -899,11 +950,15 @@ class GameController:
                 human_delay(1)
                 continue
 
-    def run_xiu_lian(self, hwnd_index=0, stop_event=None):
+    def run_xiu_lian(self, hwnd_index=0, stop_event=None, run_all=False):
         """修炼任务（单窗口版，按 hwnd_index 定位目标窗口，与 run_xiu_ye/bao_ta 一致）。
 
         :param hwnd_index: 目标窗口在 hwnd_list 中的下标，越界抛 IndexError
+        :param run_all: True 时忽略 hwnd_index，按 hwnd_list 顺序逐窗口执行
         """
+        if run_all:
+            self._run_for_all(stop_event, self.run_xiu_lian, "修炼", "is_finish_xiu_lian")
+            return
         if not 0 <= hwnd_index < len(self.hwnd_list):
             raise IndexError(
                 f"hwnd_index={hwnd_index} 超出范围，当前游戏窗口数: {len(self.hwnd_list)}")

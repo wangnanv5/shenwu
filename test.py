@@ -6,8 +6,9 @@ from shenwu.utils import *
 
 if __name__ == '__main__':
     game_controller = GameController()
-    game_controller.run_xiu_ye(0)
-    game_controller.run_xiu_lian(0)
+    # game_controller.run_xiu_ye(run_all=True)
+    # game_controller.run_xiu_lian(run_all=True)
     # game_controller.bao_ta(0,count=50)
+    game_controller.run_xun_you(run_all=True)
 
     # game_controller.reset_round()

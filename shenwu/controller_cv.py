@@ -44,6 +44,14 @@ bao_ta_mask_bottom = 0.75    # 下边界
 bao_ta_mask_left = 0.10      # 左边界（宽度比例）
 bao_ta_mask_right = 0.90     # 右边界
 
+# 开背包（点击 bag_small）参数
+open_bag_retries = 3       # 定位+点击的最大尝试次数
+open_bag_check_rounds = 3  # 每次点击后确认 is_open_bag 的轮数
+open_bag_check_gap = 0.3   # 确认轮询间隔（秒）
+
+# 挖宝 YOLO 检测参数
+wa_bao_round_gap = 3.0     # 每轮所有目标点完后的等待秒数，再进下一轮检测
+
 def make_bao_ta_mask(shape, top=None, bottom=None, left=None, right=None):
     """构造宝塔检测的中央台面 ROI 掩膜（与 _detect_bao_ta 实际使用的完全一致）
 
@@ -145,11 +153,11 @@ class GameController:
         # self.hwnd_list = self.hwnd_list[0]
         # YOLO 检测器：模型文件缺失时只警告不拦截启动（self.yolo = None），
         # 业务方法统一用 self.detect_centers(frame) 取目标中心坐标
-        # if os.path.exists(DEFAULT_ONNX_MODEL):
-        #     self.yolo = YoloDetector(DEFAULT_ONNX_MODEL)
-        # else:
-        #     self.yolo = None
-        #     print(f"❌ 未找到 YOLO 模型 {DEFAULT_ONNX_MODEL}，YOLO 检测不可用")
+        if os.path.exists(DEFAULT_ONNX_MODEL):
+            self.yolo = YoloDetector(DEFAULT_ONNX_MODEL)
+        else:
+            self.yolo = None
+            print(f"❌ 未找到 YOLO 模型 {DEFAULT_ONNX_MODEL}，YOLO 检测不可用")
 
     def set_radio(self,hwnd):
         restore_window(hwnd)
@@ -564,6 +572,137 @@ class GameController:
             return False
         self.click_match(match, region)
         return True
+
+    def open_bag(self, hwnd_index=0):
+        try:
+            return self._open_bag_hwnd(self.hwnd_list[hwnd_index])
+        except Exception:
+            traceback.print_exc()
+            return False
+
+    def _open_bag_hwnd(self, hwnd):
+        """按 hwnd 点击 bag_small 打开背包，用 is_open_bag 确认是否成功。
+
+        纯消息级、只读写自己 hwnd 的状态，线程安全，可多窗口并行调用。
+        返回 True 表示背包已打开；定位失败 / 点击后未打开返回 False。
+        """
+        region = make_region(hwnd)
+
+        for attempt in range(open_bag_retries):
+            frame = self.grab_frame(region, "gray")
+            match = self.find(frame, self.resource.bag_small_icon)
+            if match is None:
+                print("❌ 未找到 bag_small 图标")
+                return False
+
+            self.click_match(match, region)
+            windows_move_to(hwnd, 200, 200)
+
+            # 点击后确认：is_open_bag 命中即成功
+            for _ in range(open_bag_check_rounds):
+                frame = self.grab_frame(region, "gray")
+                if self.is_open_bag(frame):
+                    print("✅ 背包已打开")
+                    return True
+                human_delay(open_bag_check_gap)
+            print(f"⚠️ 点击后背包未打开，重试（第 {attempt + 1}/{open_bag_retries} 次）")
+
+        print("❌ 背包打开失败")
+        return False
+
+    def open_si_nan(self, hwnd_index=0):
+        try:
+            return self._open_si_nan_hwnd(self.hwnd_list[hwnd_index])
+        except Exception:
+            traceback.print_exc()
+            return False
+
+    def _find_si_nans(self, hwnd):
+        """检测界面上所有司南图标，返回按匹配分数降序的 match 列表"""
+        region = make_region(hwnd)
+        frame = self.grab_frame(region, "gray")
+        return self.find_all(frame, self.resource.si_nan_icon)
+
+    def _open_si_nan_hwnd(self, hwnd, match=None):
+        """按 hwnd 右键点击「司南」图标。
+
+        match 不给时自动检测并取匹配分数最高的一个；给了则直接右键该目标
+        （供 bao_tu 循环逐个点击已记录的司南坐标复用）。
+
+        纯消息级、只读写自己 hwnd 的状态，线程安全，可多窗口并行调用。
+        返回 True 表示已右键；自动检测模式下未找到目标返回 False。
+        """
+        if match is None:
+            matches = self._find_si_nans(hwnd)
+            if not matches:
+                print("❌ 未找到司南图标")
+                return False
+            if len(matches) > 1:
+                print(f"🔍 检测到 {len(matches)} 个司南图标，点击分数最高的一个")
+            match = matches[0]
+
+        # 右键点击：先消息级悬停到位再右键，点完把光标移开，防止悬停框遮挡
+        x, y = get_abs_x_y_cv_windows(match["bbox"])
+        windows_move_to(hwnd, x, y)
+        windows_right_click(hwnd, x, y)
+        windows_move_to(hwnd, 200, 200)
+
+        print(f"✅ 已右键点击司南图标 ({x}, {y})")
+        return True
+
+    def _snap_si_nan(self, hwnd, target):
+        """重新检测司南，返回距 target 最近的目标（match）；无目标返回 None。
+
+        挖宝过程中界面可能滚动/移动导致旧坐标失效，每次右键前先吸附到当前位置。
+        """
+        matches = self._find_si_nans(hwnd)
+        if not matches:
+            return None
+        return min(matches, key=lambda m: (m["bbox"][0] + m["bbox"][2] / 2 - target[0]) ** 2
+                                         + (m["bbox"][1] + m["bbox"][3] / 2 - target[1]) ** 2)
+
+    def _wa_bao_yolo(self, hwnd_index=0, stop_event=None):
+        """_wa_bao_yolo_hwnd 的按窗口序号封装"""
+        return self._wa_bao_yolo_hwnd(self.hwnd_list[hwnd_index], stop_event)
+
+    def _wa_bao_yolo_hwnd(self, hwnd, stop_event=None):
+        """挖宝(YOLO)：截图 -> YOLO 检测 -> 逐一消息级点击所有目标 -> 等 3 秒进下一轮。
+
+        某轮未检测到任何目标时返回 None（调用方借此切到下一个司南），
+        收到停止信号同样返回 None 结束。
+        YOLO 按彩色帧训练，必须传 grab_frame(region, "bgr") 的 BGR 帧。
+        """
+        if self.yolo is None:
+            print("❌ YOLO 模型未加载，挖宝任务无法执行")
+            return None
+
+        region = make_region(hwnd)
+
+        round_no = 0
+        while not is_stopped(stop_event):
+            round_no += 1
+
+            # 1. 截图并检测
+            frame = self.grab_frame(region, "bgr")
+            dets = self.yolo.detect(frame)
+
+            # 2. 本轮无目标：返回 None，该司南挖宝结束
+            if not dets:
+                print(f"🔍 第 {round_no} 轮未检测到目标，该司南挖宝结束")
+                return None
+
+            # 3. 逐一记录并点击所有目标（bbox 为帧内坐标，click_match 转消息级点击）
+            print(f"🔍 第 {round_no} 轮检测到 {len(dets)} 个目标")
+            for i, (x1, y1, x2, y2, conf, cid) in enumerate(dets):
+                bbox = (x1, y1, x2 - x1, y2 - y1)
+                print(f"  🎯 目标 {i + 1}: bbox={bbox} conf={conf:.2f}")
+                self.click_match({"bbox": bbox}, region, delay=0.2)
+
+            # 4. 所有目标点完，等 3 秒再进行下一轮
+            human_delay(wa_bao_round_gap)
+
+        print("⏹ 收到停止信号，挖宝结束")
+        return None
 
     # ---------- 业务流程 ----------
 
@@ -1183,18 +1322,55 @@ class GameController:
 
         cv2.destroyAllWindows()
 
-    # 挖宝图
-    def bao_tu(self,hwnd_index=0):
-        hwnd = self.hwnd_list[hwnd_index]
-        region = make_region(hwnd)
+    # 挖宝图：开背包 -> 记录所有司南 -> 逐个右键 -> YOLO 挖宝
+    def bao_tu(self, hwnd_index=0, stop_event=None):
+        try:
+            return self._bao_tu_hwnd(self.hwnd_list[hwnd_index], stop_event)
+        except Exception:
+            traceback.print_exc()
+            return False
 
-        self.wait_until(region, self.is_open_f9,
-                        action=lambda: windows_key(hwnd, 'f9'))
-        frame = self.wait_until(region, self.is_open_bag, want=True,
-                                action=lambda: hotkey('alt', 'e', hwnd=hwnd),
-                                action_first=True)
+    def _bao_tu_hwnd(self, hwnd, stop_event=None):
+        """完整挖宝流程（按 hwnd，消息级，可多窗口并行）。
 
-        all_match = self.find_all(frame,self.resource.si_nan_icon,0.7)
+        1. 打开背包；2. 记录所有司南中心坐标；3. 逐个右键司南并挖宝。
+        每个司南挖到 YOLO 无目标（_wa_bao_yolo_hwnd 返回 None）后换下一个，
+        直至所有司南坐标均被点击过。
+        """
+        if not self._open_bag_hwnd(hwnd):
+            print("❌ 背包未打开，挖宝流程终止")
+            return False
+
+        matches = self._find_si_nans(hwnd)
+        if not matches:
+            print("❌ 未找到司南图标，挖宝流程终止")
+            return False
+
+        # 记录所有司南中心坐标（客户区坐标），逐个处理
+        targets = [get_abs_x_y_cv_windows(m["bbox"]) for m in matches]
+        print(f"✅ 共记录 {len(targets)} 个司南目标")
+
+        for i, target in enumerate(targets):
+            if is_stopped(stop_event):
+                break
+
+            match = self._snap_si_nan(hwnd, target)
+            if match is None:
+                print(f"⚠️ 第 {i + 1}/{len(targets)} 个司南重检测失败，跳过")
+                continue
+
+            print(f"🧭 处理第 {i + 1}/{len(targets)} 个司南")
+            self._open_si_nan_hwnd(hwnd, match)
+            human_delay(1)
+
+            # 挖到 YOLO 无目标（返回 None）后继续下一个司南
+            if self._wa_bao_yolo_hwnd(hwnd, stop_event) is None:
+                # 进一步确认是否已回到背包界面；未回到说明 yolo 检测未完全收尾
+                if not self.is_open_bag(self.grab_frame(hwnd, "gray")):
+                    print("⚠️ yolo检测不完全，请手动点击")
+
+        print("🏁 所有司南均已处理，挖宝流程结束")
+        return True
 
     # 玲珑宝塔
     def _detect_bao_ta(self, hwnd, stop_event=None, timeout=None):

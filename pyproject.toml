@@ -13,12 +13,11 @@ dependencies = [
     "matplotlib>=3.11.2",
     "mss>=10.2.0",
     "munch>=4.0.0",
-    "onnxruntime-gpu==1.19.0",
+    "onnxruntime>=1.31.0",
     "opencv-python>=5.0.0.93",
     "pillow>=12.3.0",
     "pyqt6>=6.11.0",
     "pywin32>=312",
-    "rapidocr-onnxruntime>=1.4.4",
     "schedule>=1.2.2",
     "windows-capture>=2.0.1",
 ]

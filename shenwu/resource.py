@@ -45,6 +45,8 @@ class GameResource:
         self.qu_mo_icon = self._load_gray(qu_mo_icon_path)
         # 背包
         self.bag_icon = self._load_gray(bag_icon_path)
+        # 背包入口小图标（未打开状态，用于定位并点击打开背包）
+        self.bag_small_icon = self._load_gray(bag_small_path)
         # f9
         self.f9_icon = self._load_gray(f9_icon_path)
         # 交易中心可能有多个版本的图标，交给 find_jiao_yi_zhong_xin 逐个匹配取最优

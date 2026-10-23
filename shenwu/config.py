@@ -41,6 +41,7 @@ qu_mo_small_path = image_dir / "Common" / "qu_mo_small.png"
 qu_mo_icon_path = image_dir / "Common" / "qu_mo.png"
 # 背包
 bag_icon_path = image_dir / "Common" / "bag.png"
+bag_small_path = image_dir / "Common" / "bag_small.png"
 # F9
 f9_icon_path = image_dir / "Common" / "f9.png"
 # 交易中心

@@ -135,6 +135,12 @@ TASKS: tuple[TaskSpec, ...] = (
                       options=("blue", "yellow", "red")),),
         dev_only=True,
     ),
+    TaskSpec(
+        "test_si_nan", "司南检测诊断", "实时预览司南图标的 find_all 匹配结果（可调阈值）",
+        tip="打开 OpenCV 预览窗口，按 q 退出；红十字是右键实际点击的目标",
+        params=(Param("threshold", "阈值", "slider", default="0.70"),),
+        dev_only=True,
+    ),
 )
 
 DEV_TASK_KEYS = tuple(spec.key for spec in TASKS if spec.dev_only)

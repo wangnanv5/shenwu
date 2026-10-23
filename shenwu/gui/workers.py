@@ -76,6 +76,12 @@ def dispatch_task(controller, key: str, params: dict,
             stop_event=stop_event,
         )
 
+    elif key == "test_si_nan":
+        controller.test_si_nan(
+            stop_event=stop_event,
+            threshold=params.get("threshold"),
+        )
+
     else:
         raise ValueError(f"未知任务: {key}")
 

@@ -1,22 +1,24 @@
 {
   "queues": {
-    "日常": [
+    "其他": [],
+    "test": [
       {
-        "key": "xiu_ye",
-        "params": {}
-      },
-      {
-        "key": "xiu_lian",
-        "params": {}
+        "key": "bao_ta",
+        "params": {
+          "count": "50"
+        }
       }
     ]
   },
   "bindings": {
-    "三生万物": "日常"
+    "三生万物": "test"
   },
-  "active_queue": "日常",
+  "active_queue": "test",
   "show_dev_tools": false,
   "params": {
+    "bao_ta": {
+      "count": "50"
+    },
     "auto_task": {
       "task_name": "法宝引导"
     },

@@ -286,20 +286,29 @@ class GameController:
 
         return parse_game_title(win32gui.GetWindowText(hwnd))
 
-    def reset_finish_status(self, *tasks):
+    def reset_finish_status(self, *tasks, hwnd=None):
         """清空任务完成标记，让同一个任务可以被重复执行。
 
         tasks: 'xun_you' / 'xiu_ye' / 'xiu_lian'，不传则清空全部
+        hwnd : 只重置该窗口（多窗口并行运行时各线程互不清对方的标记）；
+               不传则重置全部窗口（旧行为）
         """
         keys = [f"is_finish_{t}" for t in tasks] or ["is_finish_xun_you",
                                                      "is_finish_xiu_ye",
                                                      "is_finish_xiu_lian"]
-        for status in self.hwnd_status.values():
+        if hwnd is not None:
+            statuses = [self.hwnd_status[hwnd]] if hwnd in self.hwnd_status else []
+        else:
+            statuses = list(self.hwnd_status.values())
+        for status in statuses:
             for key in keys:
                 status[key] = False
         # 重新开始时清空失败计数，否则上一轮的失败会累积到跳过阈值
-        self.window_fail_counts.clear()
-        self.current_hwnd = None
+        if hwnd is None:
+            self.window_fail_counts.clear()
+            self.current_hwnd = None
+        else:
+            self.window_fail_counts.pop(hwnd, None)
 
     # ---------- 底层：截图 / 匹配 / 轮询 ----------
 
@@ -659,7 +668,7 @@ class GameController:
                     continue
 
                 self.click_match(match, region, delay=1)
-                human_delay(3)
+                human_delay(2)
                 self.reset_round(hwnd_index)
 
             except Exception:
@@ -1248,24 +1257,22 @@ class GameController:
         hwnd = self.hwnd_list[hwnd_index]
         restore_window(hwnd)
         _count = 0
-        
-        while _count < count:
+
+        while _count < count and not is_stopped(stop_event):
             # 如果此层已经通关,一直点击
-            while True:
+            while not is_stopped(stop_event):
                 frame = self.grab_frame(hwnd)
                 human_delay(0.1)
                 if self.find(frame,self.resource.bao_ta_tong_guan_icon,0.9):
-                    match = self.find(frame,self.resource.bao_ta_an_niu_icon)                        
+                    match = self.find(frame,self.resource.bao_ta_an_niu_icon)
                     abs_x, abs_y = get_abs_x_y_cv_windows(match["bbox"])
-                    print("动态目标检测超时，未找到动态目标")
-
                     windows_click(hwnd,abs_x,abs_y)
                     human_delay(0.5)
                 else:
                     break
 
             # 如果一直没有开始挑战按钮,则一直等待
-            while True:
+            while not is_stopped(stop_event):
                 # 检测宝塔战斗目标,等待一会,不然每次战斗完会有弹窗
                 human_delay(3)
                 bbox = self._detect_bao_ta(hwnd, stop_event)
@@ -1288,15 +1295,20 @@ class GameController:
                     human_delay(2)                    
                     break
                 
-                # 这一步是移动鼠标，防止被卡住,因为可能会去点击宝箱奖励按钮
-                move_cursor_to(hwnd,abs_x,abs_y)
+                # 这一步是移动光标，防止被卡住,因为可能会去点击宝箱奖励按钮
+                windows_move_to(hwnd,abs_x,abs_y)
             self.wait_until(hwnd,self.is_in_fight,want=True)
             print("宝塔战斗开始")
-            human_delay(2) 
+            human_delay(2)
             self.reset_round(hwnd_index)
             self.wait_until(hwnd,self.is_in_fight,want=False)
             print("战斗结束")
             _count += 1
+
+        if is_stopped(stop_event):
+            print(f"⏹ 宝塔任务已停止（完成 {_count}/{count} 层）")
+        else:
+            print(f"✅ 宝塔任务完成（{_count} 层）")
 
     # 测试
     # 诊断用：检测 resource 中所有图标是否出现在当前游戏窗口

@@ -78,25 +78,25 @@ QLabel#pill[state="run"] {
 }
 
 /* ---------- 面板与卡片 ---------- */
-QFrame#queueBar, QFrame#card {
+/* 队列面板保持精致；任务卡片走极简风：方角、纯平、无悬停装饰 */
+QFrame#queueBar {
     background: #121826;
     border: 1px solid #232c40;
     border-radius: 14px;
 }
-QFrame#card:hover {
-    border: 1px solid #2e3a55;
+QFrame#card {
+    background: #10151f;
+    border: 1px solid #1f2739;
+    border-radius: 4px;
 }
 QFrame#card[state="running"] {
-    background: #131c2c;
     border: 1px solid #5b8cff;
 }
 QFrame#card[state="stopping"] {
-    background: #20180f;
     border: 1px solid #ffb454;
 }
 QFrame#card[locked="true"] {
-    background: #10151f;
-    border: 1px solid #1d2432;
+    background: #0e1219;
 }
 
 QLabel#cardTitle {
@@ -119,15 +119,6 @@ QLabel#sectionLabel {
     color: #9aa4bd;
 }
 
-QLabel#queueBadge {
-    font-size: 11px;
-    font-weight: 600;
-    color: #8fb4ff;
-    background: #17233c;
-    border: 1px solid #2c518a;
-    border-radius: 9px;
-    padding: 1px 8px;
-}
 QLabel#queueProgress {
     font-size: 12px;
     font-weight: 600;
@@ -160,22 +151,19 @@ QPushButton:disabled {
 }
 
 QPushButton[primary="true"] {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #6a5cff, stop:1 #4f8cff);
+    background: #4a6ef5;
     border: none;
-    border-radius: 8px;
-    padding: 7px 20px;
+    border-radius: 6px;
+    padding: 6px 14px;
     color: #ffffff;
     font-size: 12px;
     font-weight: 600;
 }
 QPushButton[primary="true"]:hover {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #7b6dff, stop:1 #619bff);
+    background: #5b7ff7;
 }
 QPushButton[primary="true"]:pressed {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #5a4ce0, stop:1 #4173e6);
+    background: #3f5fd9;
 }
 QPushButton[primary="true"]:focus {
     border: 1px solid #9db4ff;
@@ -332,6 +320,15 @@ QTableWidget#windowTable::item:selected {
     background: #24406e;
     color: #eaf1ff;
 }
+/* 表格内嵌按钮：紧凑内边距，保证 sizeHint 高度恒小于行内可用高度，
+   汉字在任何 DPI 缩放下都不被纵向挤压（字体 12 + 上下 3×2 + 描边 ≈ 20 逻辑px） */
+QTableWidget QPushButton {
+    padding: 3px 10px;
+    border-radius: 6px;
+}
+QTableWidget QPushButton[primary="true"] {
+    padding: 3px 12px;
+}
 QHeaderView::section {
     background: #141a26;
     color: #9aa4bd;
@@ -351,6 +348,19 @@ QTextEdit#log {
     color: #c3ccdd;
     font-size: 12px;
     selection-background-color: #2c518a;
+}
+
+/* ---------- 分栏分隔条 ---------- */
+QSplitter::handle {
+    background: transparent;
+}
+QSplitter::handle:hover {
+    background: #2e3a55;
+}
+QSplitter::handle:horizontal {
+    width: 3px;
+    margin: 8px 1px;
+    border-radius: 1px;
 }
 
 /* ---------- 滚动条 ---------- */

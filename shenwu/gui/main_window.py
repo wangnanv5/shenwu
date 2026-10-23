@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -40,6 +41,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QSplitter,
     QSystemTrayIcon,
     QTableWidget,
     QTableWidgetItem,
@@ -54,7 +56,7 @@ import win32gui
 
 from shenwu.gui import settings
 from shenwu.gui.theme import QSS
-from shenwu.gui.workers import TaskWorker
+from shenwu.gui.workers import RowWorker, dispatch_task
 
 # 「定位」标识：边框颜色与自动消失时长
 IDENTIFY_COLOR = (255, 200, 0)
@@ -109,6 +111,11 @@ TASKS: tuple[TaskSpec, ...] = (
         "xiu_lian", "修炼", "寻物 / 找人 / 疯道人，未接任务时从日历寻路",
     ),
     TaskSpec(
+        "bao_ta", "玲珑宝塔", "自动挑战宝塔并确保战斗开启，按次数循环",
+        params=(Param("count", "挑战次数", "text", default="10",
+                      placeholder="如：10"),),
+    ),
+    TaskSpec(
         "auto_task", "OCR 自动任务", "OCR 识别屏幕上的任务名并点击",
         params=(Param("task_name", "任务名", "history", default="法宝引导",
                       placeholder="如：法宝引导"),),
@@ -156,18 +163,15 @@ class TaskCard(QFrame):
         self.setProperty("state", "idle")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(10, 8, 10, 8)
-        root.setSpacing(6)
+        root.setContentsMargins(8, 6, 8, 6)
+        root.setSpacing(4)
 
-        # 标题 + 队列计数
+        # 标题
         head = QHBoxLayout()
         head.setSpacing(6)
         title = QLabel(spec.title)
         title.setObjectName("cardTitle")
-        self.queue_badge = QLabel("")
-        self.queue_badge.setObjectName("queueBadge")
         head.addWidget(title)
-        head.addWidget(self.queue_badge)
         head.addStretch(1)
         root.addLayout(head)
 
@@ -307,10 +311,6 @@ class TaskCard(QFrame):
             self.setProperty("locked", True)
             _repolish(self)
 
-    def set_queue_count(self, count: int):
-        """该任务在当前队列里出现了几次，方便确认已加入"""
-        self.queue_badge.setText(f"队列 ×{count}" if count else "")
-
 
 class _LogTee:
     """把 print / traceback 同时送到界面日志和原始终端。
@@ -354,16 +354,14 @@ class _LogTee:
 
 class MainWindow(QMainWindow):
     log_text = pyqtSignal(str)
+    # 窗口队列线程结束时由线程内发出（跨线程 queued 投递，安全）
+    row_finished = pyqtSignal(int)
 
     def __init__(self):
         super().__init__()
         self.cards: dict[str, TaskCard] = {}
-        self.worker: TaskWorker | None = None
-        self.mode: str | None = None  # "plan" / None
-        self._current_index = -1
-        self._current_key: str | None = None
-        self._stopping = False
-        self._last_error = ""
+        # 运行中的窗口队列线程：hwnd -> {"worker": RowWorker, "queue": str}
+        self._row_workers: dict[int, dict] = {}
 
         # 队列定义（持久化）与窗口绑定（运行时 hwnd -> 队列名）
         self.queues: dict[str, list[dict]] = {}
@@ -380,9 +378,11 @@ class MainWindow(QMainWindow):
         self._identify_timer.setInterval(30)
         self._identify_timer.timeout.connect(self._pump_identify)
 
-        # 当前任务名（显示在窗口边框上）/ 正在处理的窗口
-        self._active_task = ""
-        self._active_hwnd: int | None = None
+        # 每行的行内控件（表格重建时同步重建）
+        self._row_combos: dict[int, QComboBox] = {}
+        self._row_run_buttons: dict[int, QPushButton] = {}
+        self._row_stop_buttons: dict[int, QPushButton] = {}
+
         self._log_lines: list[str] = []  # 过滤用的日志缓冲
         self._listed_hwnds: list[int] = []  # 上一次列表里的 hwnd，用于判断是否需要重建
         self.settings = settings.load()
@@ -408,6 +408,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 820)
 
         self.log_text.connect(self._append_log)
+        self.row_finished.connect(self._on_row_finished)
 
         self._build_header()
         self._build_body()
@@ -430,10 +431,12 @@ class MainWindow(QMainWindow):
         self._reflow_cards()
 
     def _reflow_cards(self):
-        """响应式：按窗口宽度自适应任务卡片的列数（每列约 280px，1~4 列）"""
+        """响应式：按右侧任务区实际宽度自适应卡片列数（每列约 280px，1~4 列）"""
         if not hasattr(self, "_cards_grid"):
             return
-        cols = max(1, min(GRID_COLUMNS, (self.width() - 70) // 280))
+        base = (self._task_scroll.viewport().width()
+                if getattr(self, "_task_scroll", None) is not None else self.width())
+        cols = max(1, min(GRID_COLUMNS, (base - 24) // 280))
         if cols == self._grid_cols:
             return
         self._grid_cols = cols
@@ -594,16 +597,31 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(20, 16, 20, 16)
         outer.setSpacing(14)
         outer.addWidget(self._header)
-        outer.addWidget(self._build_queue_panel())
-        outer.addWidget(self._build_task_area(), 1)
+        outer.addWidget(self._build_queue_task_split(), 1)
+        outer.addWidget(self._build_window_table())
         outer.addWidget(self._build_log_area())
         self.setCentralWidget(root)
 
-    # ---------- 队列管理面板 ----------
+    # ---------- 队列与任务分栏 ----------
+
+    def _build_queue_task_split(self) -> QWidget:
+        """左右分栏：左=队列管理（高优先级、占宽），右=任务卡片（压缩、低优先级）"""
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.addWidget(self._build_queue_panel())
+        splitter.addWidget(self._build_task_area())
+        # 左侧队列面板优先：额外空间全给左栏，右栏固定在初始宽度不再增长
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
+        splitter.setSizes([520, 480])
+        return splitter
 
     def _build_queue_panel(self) -> QWidget:
+        """左侧队列管理区：队列增删改名 + 任务列表（纵向滚动）+ 顺序调整 + 轮次控制"""
         panel = QFrame()
         panel.setObjectName("queueBar")
+        # 最小宽度保证「轮次/间隔/出错继续/定时」一行完整显示，不被挤压截断
+        panel.setMinimumWidth(430)
 
         label = QLabel("执行队列")
         label.setObjectName("sectionLabel")
@@ -619,18 +637,20 @@ class MainWindow(QMainWindow):
         self.btn_queue_new.clicked.connect(self._new_queue)
         self.btn_queue_delete = QPushButton("删除")
         self.btn_queue_delete.clicked.connect(self._delete_queue)
+        self.btn_queue_rename = QPushButton("重命名")
+        self.btn_queue_rename.clicked.connect(self._rename_queue)
 
-        row1 = QHBoxLayout()
-        row1.setSpacing(10)
-        row1.addWidget(label)
-        row1.addWidget(self.combo_queue, 1)
-        row1.addWidget(self.btn_queue_new)
-        row1.addWidget(self.btn_queue_delete)
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        head.addWidget(label)
+        head.addWidget(self.combo_queue, 1)
+        head.addWidget(self.btn_queue_new)
+        head.addWidget(self.btn_queue_rename)
+        head.addWidget(self.btn_queue_delete)
 
-        # 队列内容
+        # 队列内容：纵向占满面板剩余高度，任务多时自动出滚动条
         self.queue_list = QListWidget()
         self.queue_list.setObjectName("queueList")
-        self.queue_list.setFixedHeight(120)
         self.queue_list.setToolTip("当前队列的任务顺序；选中后可上移 / 下移 / 移除")
 
         self.btn_task_up = QPushButton("上移")
@@ -642,45 +662,78 @@ class MainWindow(QMainWindow):
         self.btn_queue_clear = QPushButton("清空")
         self.btn_queue_clear.clicked.connect(self._clear_queue_tasks)
 
-        side = QVBoxLayout()
-        side.setSpacing(6)
-        side.addWidget(self.btn_task_up)
-        side.addWidget(self.btn_task_down)
-        side.addWidget(self.btn_task_remove)
-        side.addWidget(self.btn_queue_clear)
-
-        content = QHBoxLayout()
-        content.setSpacing(10)
-        content.addWidget(self.queue_list, 1)
-        content.addLayout(side)
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        actions.addWidget(self.btn_task_up)
+        actions.addWidget(self.btn_task_down)
+        actions.addWidget(self.btn_task_remove)
+        actions.addStretch(1)
+        actions.addWidget(self.btn_queue_clear)
 
         box = QVBoxLayout(panel)
         box.setContentsMargins(14, 10, 14, 10)
         box.setSpacing(8)
-        box.addLayout(row1)
-        box.addLayout(content)
+        box.addLayout(head)
+        box.addWidget(self.queue_list, 1)
+        box.addLayout(actions)
         box.addLayout(self._build_loop_controls())
         return panel
 
-    def _build_loop_controls(self) -> QHBoxLayout:
-        """轮次 / 间隔 / 出错继续 / 定时执行"""
-        row = QHBoxLayout()
-        row.setSpacing(8)
+    def _rename_queue(self):
+        """重命名当前队列：保持原顺序，同步绑定关系与持久化"""
+        old = self.active_queue
+        if not old or old not in self.queues:
+            QMessageBox.information(self, "提示", "请先选择要重命名的队列")
+            return
+        new, ok = QInputDialog.getText(self, "重命名队列", "新名字:", text=old)
+        new = (new or "").strip()
+        if not ok or not new or new == old:
+            return
+        if new in self.queues:
+            QMessageBox.information(self, "提示", f"队列「{new}」已存在")
+            return
+        # 字典按插入序重建，重命名后保持队列排列顺序不变
+        self.queues = {(new if name == old else name): items
+                       for name, items in self.queues.items()}
+        self.active_queue = new
+        self.bindings = {hwnd: (new if queue == old else queue)
+                         for hwnd, queue in self.bindings.items()}
+        self._save_bindings()
+        self._refresh_queue_panel()
+        self._append_log(f"✏️ 队列「{old}」已重命名为「{new}」\n")
+
+    def _build_loop_controls(self) -> QVBoxLayout:
+        """轮次 / 间隔 / 出错继续 / 定时执行（两行排布，每行顶格面板全宽，不截断）"""
+        box = QVBoxLayout()
+        box.setSpacing(6)
+
+        # 第一行：轮次 + 间隔
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
 
         self.spin_times = QSpinBox()
         self.spin_times.setRange(0, 999)
         self.spin_times.setValue(1)
-        self.spin_times.setFixedWidth(52)
         self.spin_times.setToolTip("整个计划执行的轮次：1 = 跑一遍；0 = 一直重复，直到手动停止")
         self.spin_times.valueChanged.connect(self._save_settings)
 
         self.spin_interval = QSpinBox()
         self.spin_interval.setRange(0, 3600)
         self.spin_interval.setValue(30)
-        self.spin_interval.setFixedWidth(60)
+        self.spin_interval.setMinimumWidth(80)
         self.spin_interval.setSuffix("s")
         self.spin_interval.setToolTip("每轮结束后的等待秒数（可被停止打断）")
         self.spin_interval.valueChanged.connect(self._save_settings)
+
+        row1.addWidget(QLabel("轮次"))
+        row1.addWidget(self.spin_times)
+        row1.addWidget(QLabel("间隔"))
+        row1.addWidget(self.spin_interval)
+        row1.addStretch(1)
+
+        # 第二行：出错继续 + 定时
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
 
         self.chk_continue_on_error = QCheckBox("出错继续")
         self.chk_continue_on_error.setToolTip("某个任务报错时跳过它，继续执行后面的任务")
@@ -692,18 +745,16 @@ class MainWindow(QMainWindow):
 
         self.time_schedule = QTimeEdit()
         self.time_schedule.setDisplayFormat("HH:mm")
-        self.time_schedule.setFixedWidth(62)
         self.time_schedule.timeChanged.connect(lambda _t: self._apply_schedule_setting())
 
-        row.addWidget(QLabel("轮次"))
-        row.addWidget(self.spin_times)
-        row.addWidget(QLabel("间隔"))
-        row.addWidget(self.spin_interval)
-        row.addWidget(self.chk_continue_on_error)
-        row.addWidget(self.chk_schedule)
-        row.addWidget(self.time_schedule)
-        row.addStretch(1)
-        return row
+        row2.addWidget(self.chk_continue_on_error)
+        row2.addWidget(self.chk_schedule)
+        row2.addWidget(self.time_schedule)
+        row2.addStretch(1)
+
+        box.addLayout(row1)
+        box.addLayout(row2)
+        return box
 
     # ---------- 队列管理 ----------
 
@@ -717,19 +768,16 @@ class MainWindow(QMainWindow):
         self.combo_queue.blockSignals(False)
 
         self._refresh_queue_list()
-        self._refresh_card_badges()
-        # 同步窗口面板的运行队列下拉框（保持当前选择不变）
-        current = self.combo_run_queue.currentText()
-        self.combo_run_queue.blockSignals(True)
-        self.combo_run_queue.clear()
-        self.combo_run_queue.addItems(list(self.queues))
-        if current in self.queues:
-            self.combo_run_queue.setCurrentText(current)
-        elif self.active_queue:
-            self.combo_run_queue.setCurrentText(self.active_queue)
-        self.combo_run_queue.blockSignals(False)
+        # 同步各行「绑定队列」下拉框的选项（保持当前选择不变）
+        for hwnd, combo in self._row_combos.items():
+            current = self.bindings.get(hwnd, combo.currentText())
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(list(self.queues))
+            if current in self.queues:
+                combo.setCurrentText(current)
+            combo.blockSignals(False)
         self.btn_queue_delete.setEnabled(len(self.queues) > 1)
-        self._update_run_button()
 
     def _refresh_queue_list(self):
         self.queue_list.clear()
@@ -740,11 +788,6 @@ class MainWindow(QMainWindow):
             self.queue_list.addItem(QListWidgetItem(
                 f"{title}{'  ' + extra if extra else ''}"))
 
-    def _refresh_card_badges(self):
-        for key, card in self.cards.items():
-            card.set_queue_count(sum(1 for item in self._active_queue_items()
-                                     if item["key"] == key))
-
     def _active_queue_items(self) -> list[dict]:
         return self.queues.get(self.active_queue, [])
 
@@ -753,7 +796,6 @@ class MainWindow(QMainWindow):
             return
         self.active_queue = name
         self._refresh_queue_list()
-        self._refresh_card_badges()
         self._save_settings()
 
     def _new_queue(self):
@@ -800,8 +842,6 @@ class MainWindow(QMainWindow):
         params = self.cards[key].get_params()
         self.queues[self.active_queue].append({"key": key, "params": params})
         self._refresh_queue_list()
-        self._refresh_card_badges()
-        self._update_run_button()
         self._save_settings()
         title = self.cards[key].spec.title
         self._append_log(f"➕ 已把「{title}」加入队列「{self.active_queue}」\n")
@@ -826,8 +866,6 @@ class MainWindow(QMainWindow):
             return
         removed = items.pop(row)
         self._refresh_queue_list()
-        self._refresh_card_badges()
-        self._update_run_button()
         self._save_settings()
         spec = next((s for s in TASKS if s.key == removed["key"]), None)
         self._append_log(f"➖ 已从队列移除「{spec.title if spec else removed['key']}」\n")
@@ -837,8 +875,6 @@ class MainWindow(QMainWindow):
             return
         self.queues[self.active_queue] = []
         self._refresh_queue_list()
-        self._refresh_card_badges()
-        self._update_run_button()
         self._save_settings()
         self._append_log(f"🧹 已清空队列「{self.active_queue}」\n")
 
@@ -849,7 +885,11 @@ class MainWindow(QMainWindow):
         container.setObjectName("taskContainer")
         outer = QVBoxLayout(container)
         outer.setContentsMargins(2, 2, 2, 2)
-        outer.setSpacing(14)
+        outer.setSpacing(10)
+
+        label = QLabel("任务")
+        label.setObjectName("sectionLabel")
+        outer.addWidget(label)
 
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
@@ -865,25 +905,25 @@ class MainWindow(QMainWindow):
             grid.addWidget(card, index // GRID_COLUMNS, index % GRID_COLUMNS)
 
         outer.addLayout(grid)
-        outer.addWidget(self._build_window_table())
         outer.addStretch(1)
 
-        area = QScrollArea()
-        area.setObjectName("taskArea")
-        area.setWidgetResizable(True)
-        area.setFrameShape(QFrame.Shape.NoFrame)
-        area.setWidget(container)
-        return area
+        # 右侧任务区独立滚动：任务多时纵向滚动查看，不影响左侧队列
+        self._task_scroll = QScrollArea()
+        self._task_scroll.setObjectName("taskArea")
+        self._task_scroll.setWidgetResizable(True)
+        self._task_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._task_scroll.setWidget(container)
+        return self._task_scroll
 
     def _build_window_table(self) -> QWidget:
-        """窗口列表：已连接的游戏窗口（按 hwnd 升序），单选后选队列直接运行"""
+        """窗口列表：每行 = hwnd + 该行的绑定队列下拉框 + 运行/停止按钮"""
         frame = QFrame()
         frame.setObjectName("card")
 
         title = QLabel("窗口（hwnd）")
         title.setObjectName("cardTitle")
 
-        self.window_label = QLabel("选中一个窗口，选择队列后点「运行」")
+        self.window_label = QLabel("每行选择绑定队列后点「运行」，可多行同时运行")
         self.window_label.setObjectName("cardDesc")
 
         self.chk_auto_refresh = QCheckBox("自动刷新")
@@ -894,35 +934,23 @@ class MainWindow(QMainWindow):
         btn_refresh = QPushButton("刷新")
         btn_refresh.clicked.connect(lambda: self._refresh_window_table(force=True))
 
-        # 运行控件：选中 hwnd -> 选队列 -> 运行
         self.queue_progress = QLabel("")
         self.queue_progress.setObjectName("queueProgress")
 
-        self.combo_run_queue = QComboBox()
-        self.combo_run_queue.setToolTip("当前选中窗口要执行的队列")
-        self.combo_run_queue.currentTextChanged.connect(lambda _t: self._update_run_button())
-
-        self.btn_run = QPushButton("运行")
-        self.btn_run.setProperty("primary", True)
-        self.btn_run.setEnabled(False)
-        self.btn_run.clicked.connect(self._run_selected)
-
-        self.btn_stop = QPushButton("停止")
-        self.btn_stop.setProperty("danger", True)
-        self.btn_stop.setEnabled(False)
-        self.btn_stop.clicked.connect(lambda: self._on_stop())
+        self.btn_stop_all = QPushButton("全部停止")
+        self.btn_stop_all.setProperty("danger", True)
+        self.btn_stop_all.setEnabled(False)
+        self.btn_stop_all.setToolTip("立即终止所有运行中的窗口")
+        self.btn_stop_all.clicked.connect(lambda: self._on_stop())
 
         head = QHBoxLayout()
         head.setSpacing(10)
         head.addWidget(title)
         head.addWidget(self.window_label, 1)
         head.addWidget(self.queue_progress)
-        head.addWidget(QLabel("队列"))
-        head.addWidget(self.combo_run_queue)
         head.addWidget(self.chk_auto_refresh)
         head.addWidget(btn_refresh)
-        head.addWidget(self.btn_run)
-        head.addWidget(self.btn_stop)
+        head.addWidget(self.btn_stop_all)
 
         self.window_table = QTableWidget(0, 3)
         self.window_table.setObjectName("windowTable")
@@ -944,7 +972,7 @@ class MainWindow(QMainWindow):
         # 「操作」列固定宽度：ResizeToContents 按单元格文本算宽，嵌入的按钮
         # 控件不参与计算，空间不足时列会被压到按钮不可见；固定宽度杜绝挤压
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self.window_table.setColumnWidth(2, 88)
+        self.window_table.setColumnWidth(2, 208)
 
         box = QVBoxLayout(frame)
         box.setContentsMargins(16, 14, 16, 14)
@@ -983,27 +1011,58 @@ class MainWindow(QMainWindow):
         table.blockSignals(True)
         table.setRowCount(len(infos))
         self._identify_buttons.clear()
+        self._row_combos.clear()
+        self._row_run_buttons.clear()
+        self._row_stop_buttons.clear()
 
         for row, (_, hwnd, _title, server) in enumerate(infos):
             hwnd_item = QTableWidgetItem(str(hwnd))
             hwnd_item.setData(Qt.ItemDataRole.UserRole, hwnd)
             table.setItem(row, 0, hwnd_item)
 
-            table.setItem(row, 1, QTableWidgetItem(self.bindings.get(hwnd, "")))
+            # 「绑定队列」下拉框：选择即绑定该行窗口（写入 bindings 并持久化）
+            combo = QComboBox()
+            combo.addItems(list(self.queues))
+            bound = self.bindings.get(hwnd, "")
+            if bound in self.queues:
+                combo.setCurrentText(bound)
+            combo.setFixedHeight(28)
+            combo.currentTextChanged.connect(
+                lambda text, h=hwnd: self._on_row_queue_changed(h, text))
+            table.setCellWidget(row, 1, combo)
+            self._row_combos[hwnd] = combo
 
-            # 「定位」按钮：点击给目标窗口挂临时边框标识，再点提前收起
-            # 定高 26px + 居中容器：行高无论如何变化，按钮竖直方向不变形
-            btn = QPushButton("收起" if hwnd in self._identify_overlays else "定位")
-            btn.setToolTip(f"在屏幕上高亮标识 hwnd={hwnd} 对应的窗口（5 秒自动消失）")
-            btn.setMinimumWidth(72)
-            btn.setFixedHeight(26)
-            btn.clicked.connect(lambda _=False, h=hwnd: self._identify_hwnd(h))
-            cell = QWidget()
-            cell_layout = QHBoxLayout(cell)
-            cell_layout.setContentsMargins(4, 3, 4, 3)
-            cell_layout.addWidget(btn)
-            table.setCellWidget(row, 2, cell)
-            self._identify_buttons[hwnd] = btn
+            # 「操作」列：定位 | 运行 | 停止（停止仅在该行运行中可用）
+            # 统一定高 28px + 容器上下边距对称 4px：36px 行高内垂直居中，
+            # 且 28 > 按钮内容所需（12px 字 + 3px×2 紧凑内边距 + 描边 ≈ 20px），
+            # 任何 DPI 缩放下汉字都完整不变形
+            btn_identify = QPushButton("收起" if hwnd in self._identify_overlays else "定位")
+            btn_identify.setToolTip(f"在屏幕上高亮标识 hwnd={hwnd} 对应的窗口（5 秒自动消失）")
+            btn_identify.setFixedHeight(28)
+            btn_identify.clicked.connect(lambda _=False, h=hwnd: self._identify_hwnd(h))
+
+            running = hwnd in self._row_workers
+            btn_run = QPushButton("运行中" if running else "运行")
+            btn_run.setProperty("primary", True)
+            btn_run.setFixedHeight(28)
+            btn_run.setEnabled(not running)
+            btn_run.clicked.connect(lambda _=False, h=hwnd: self._run_row(h))
+
+            btn_stop = QPushButton("停止")
+            btn_stop.setFixedHeight(28)
+            btn_stop.setEnabled(running)
+            btn_stop.clicked.connect(lambda _=False, h=hwnd: self._stop_row(h))
+
+            ops = QWidget()
+            ops_layout = QHBoxLayout(ops)
+            ops_layout.setContentsMargins(4, 4, 4, 4)
+            ops_layout.setSpacing(4)
+            for b in (btn_identify, btn_run, btn_stop):
+                ops_layout.addWidget(b)
+            table.setCellWidget(row, 2, ops)
+            self._identify_buttons[hwnd] = btn_identify
+            self._row_run_buttons[hwnd] = btn_run
+            self._row_stop_buttons[hwnd] = btn_stop
 
             # 上次保存的服务器名 → 恢复选中行（仅内部使用，不在表格显示）
             if server and server == saved_server:
@@ -1014,7 +1073,7 @@ class MainWindow(QMainWindow):
         table.blockSignals(False)
         self.selected_hwnds = self._selected_hwnds()
         self._update_window_label()
-        self._update_run_button()
+        self._update_queue_progress()
         if self._identify_overlays:
             self._identify_timer.start()
         if force:
@@ -1032,17 +1091,13 @@ class MainWindow(QMainWindow):
         self.bindings = resolved
 
     def _refresh_bindings_column(self):
-        table = self.window_table
-        table.blockSignals(True)
-        for row in range(table.rowCount()):
-            item = table.item(row, 0)
-            if item is None:
-                continue
-            hwnd = int(item.data(Qt.ItemDataRole.UserRole))
-            bind_item = table.item(row, 1)
-            if bind_item is not None:
-                bind_item.setText(self.bindings.get(hwnd, ""))
-        table.blockSignals(False)
+        """绑定变化时同步各行的队列下拉框（不动选择与运行状态）"""
+        for hwnd, combo in self._row_combos.items():
+            bound = self.bindings.get(hwnd, "")
+            if bound in self.queues and combo.currentText() != bound:
+                combo.blockSignals(True)
+                combo.setCurrentText(bound)
+                combo.blockSignals(False)
 
     def _on_auto_refresh_toggled(self, enabled: bool):
         if enabled and not self._is_busy():
@@ -1080,7 +1135,6 @@ class MainWindow(QMainWindow):
         self.settings["selected_server"] = server
         self._save_settings()
         self._update_window_label()
-        self._update_run_button()
 
     def _update_window_label(self):
         hwnd = self.selected_hwnds[0] if self.selected_hwnds else None
@@ -1090,18 +1144,27 @@ class MainWindow(QMainWindow):
         bound_queue = self.bindings.get(hwnd, "未绑定")
         self.window_label.setText(f"hwnd={hwnd} · 绑定队列：{bound_queue}")
 
-    def _run_selected(self):
-        """以 hwnd 为核心的执行入口：选中窗口 + 所选队列，点「运行」立即执行"""
-        if self._is_busy():
-            QMessageBox.information(self, "提示", "已有任务在运行，请先停止后再执行")
+    # ---------- 行级执行：每行独立线程，多行可同时运行 ----------
+
+    def _on_row_queue_changed(self, hwnd: int, text: str):
+        """行内下拉框选择队列 = 绑定该窗口（写入 bindings 并持久化）"""
+        if self._restoring:
             return
-        hwnd = self._selected_hwnd()
-        if hwnd is None:
-            QMessageBox.information(self, "提示", "请先在窗口列表选中一个窗口")
+        text = (text or "").strip()
+        if text and text in self.queues:
+            self.bindings[hwnd] = text
+            self._save_bindings()
+
+    def _run_row(self, hwnd: int):
+        """运行某一行：该 hwnd 按其绑定的队列起独立线程，与其他行互不干扰"""
+        if hwnd in self._row_workers:
             return
-        queue_name = self.combo_run_queue.currentText().strip()
+        combo = self._row_combos.get(hwnd)
+        queue_name = combo.currentText().strip() if combo is not None \
+            else self.bindings.get(hwnd, "")
         if queue_name not in self.queues:
-            QMessageBox.information(self, "提示", "请先选择一个队列（没有就先在「执行队列」面板新建）")
+            QMessageBox.information(self, "提示",
+                                    f"hwnd={hwnd} 还没有选择队列，先在「绑定队列」下拉框选择")
             return
         tasks = [(item["key"], dict(item.get("params") or {}))
                  for item in self.queues.get(queue_name, [])]
@@ -1110,22 +1173,80 @@ class MainWindow(QMainWindow):
                                     f"队列「{queue_name}」是空的，先从任务卡片「加入队列」")
             return
 
-        # 运行即绑定：该 hwnd 执行此队列；定时执行与边框显示复用这条绑定
         self.bindings[hwnd] = queue_name
-        self._refresh_bindings_column()
         self._save_bindings()
+        self._start_row_worker(hwnd, queue_name, tasks)
 
-        plan = [(hwnd, queue_name, tasks)]
-        self._append_log(f"\n▶ [{_now()}] 开始执行：hwnd={hwnd} → 队列「{queue_name}」×{len(tasks)}\n")
-        self._launch(plan)
+    def _start_row_worker(self, hwnd: int, queue_name: str, tasks):
+        """为 hwnd 启动一条队列执行线程（已在线程中则忽略）"""
+        if hwnd in self._row_workers:
+            return
+        from shenwu.controller_cv import get_controller
 
-    def _update_run_button(self):
-        """有选中窗口且所选队列非空时，「运行」才可用"""
-        busy = self._is_busy()
-        hwnd = self._selected_hwnd()
-        queue_name = self.combo_run_queue.currentText().strip()
-        self.btn_run.setEnabled(
-            not busy and hwnd is not None and bool(self.queues.get(queue_name)))
+        controller = get_controller()
+        worker = RowWorker(controller, hwnd, queue_name, tasks,
+                           rounds=self.spin_times.value(),
+                           round_interval=self.spin_interval.value(),
+                           on_finished=self.row_finished.emit)
+        self._row_workers[hwnd] = {"worker": worker, "queue": queue_name}
+        self._set_row_buttons(hwnd)
+        self._update_queue_progress()
+        # OCR 任务名进历史（此处是 GUI 线程，更新下拉框安全）
+        for key, params in tasks:
+            if key == "auto_task" and (params or {}).get("task_name"):
+                self._update_ocr_history(params["task_name"])
+        # 运行期间暂停自动刷新，避免重建行干扰运行状态显示
+        self._auto_refresh_timer.stop()
+        worker.start()
+        self._append_log(
+            f"▶ [{_now()}] hwnd={hwnd} 开始执行队列「{queue_name}」×{len(tasks)}\n")
+
+    def _stop_row(self, hwnd: int):
+        """优雅停止单行：在任务循环边界退出（数秒内），不打断当前操作"""
+        entry = self._row_workers.get(hwnd)
+        if entry is None:
+            return
+        entry["worker"].request_stop()
+        self._append_log(f"⏹ [{_now()}] 已请求停止 hwnd={hwnd}\n")
+
+    def _stop_all_rows(self, immediate: bool = False):
+        """停止全部运行中的行；immediate=True 时同时置全局终止信号立即打断"""
+        if not self._row_workers:
+            return
+        for entry in self._row_workers.values():
+            entry["worker"].request_stop()
+        if immediate:
+            from shenwu.utils import request_terminate
+
+            request_terminate()
+        self._append_log(
+            f"⏹ [{_now()}] 已请求停止全部运行中的窗口（{len(self._row_workers)} 个）\n")
+
+    def _on_row_finished(self, hwnd: int):
+        """行线程结束（跨线程信号）：恢复按钮状态与自动刷新"""
+        entry = self._row_workers.pop(hwnd, None)
+        queue_name = entry["queue"] if entry else ""
+        self._set_row_buttons(hwnd)
+        self._update_queue_progress()
+        self._append_log(f"✅ [{_now()}] hwnd={hwnd} 队列「{queue_name}」执行结束\n")
+        if not self._row_workers and self.chk_auto_refresh.isChecked():
+            self._auto_refresh_timer.start()
+
+    def _set_row_buttons(self, hwnd: int):
+        """行按钮状态与运行状态保持一致：运行中 → 运行禁用/停止可用"""
+        running = hwnd in self._row_workers
+        run_btn = self._row_run_buttons.get(hwnd)
+        stop_btn = self._row_stop_buttons.get(hwnd)
+        if run_btn is not None:
+            run_btn.setText("运行中" if running else "运行")
+            run_btn.setEnabled(not running)
+        if stop_btn is not None:
+            stop_btn.setEnabled(running)
+
+    def _update_queue_progress(self):
+        count = len(self._row_workers)
+        self.queue_progress.setText(f"运行中 {count}" if count else "")
+        self.btn_stop_all.setEnabled(count > 0)
 
     # ---------- 「定位」按钮：临时高亮标识目标窗口 ----------
 
@@ -1298,166 +1419,36 @@ class MainWindow(QMainWindow):
         self.pill.setProperty("state", state)
         _repolish(self.pill)
 
-    # ---------- 执行计划 ----------
+    # ---------- 执行（每行独立线程，可并行） ----------
 
     def _is_busy(self) -> bool:
-        return self.worker is not None and self.worker.isRunning()
-
-    def _build_plan_items(self) -> list[tuple[int, str, list[tuple[str, dict]]]]:
-        """把绑定转成执行计划：[(hwnd, 队列名, [(key, params), ...]), ...]，按 hwnd 升序"""
-        plan = []
-        for hwnd in sorted(self.bindings):
-            queue_name = self.bindings[hwnd]
-            tasks = [(item["key"], dict(item.get("params") or {}))
-                     for item in self.queues.get(queue_name, [])]
-            if tasks:
-                plan.append((hwnd, queue_name, tasks))
-        return plan
-
-    def _start_plan(self):
-        """定时执行的入口：按各窗口已绑定的队列依次执行（手动运行走 _run_selected）"""
-        if self._is_busy():
-            QMessageBox.information(self, "提示", "已有任务在运行，请先停止后再执行")
-            return
-        plan = self._build_plan_items()
-        if not plan:
-            QMessageBox.information(
-                self, "提示",
-                "还没有可执行的计划：先在窗口面板选中窗口、选好队列点「运行」（运行即绑定）")
-            return
-
-        plan_desc = " | ".join(
-            f"hwnd={hwnd}→{name}×{len(tasks)}" for hwnd, name, tasks in plan)
-        self._append_log(f"\n▶ [{_now()}] 开始执行计划（{len(plan)} 个窗口）：{plan_desc}\n")
-        self._launch(plan)
-
-    def _launch(self, plan):
-        rounds = self.spin_times.value()
-        interval = self.spin_interval.value()
-
-        worker = TaskWorker(plan, self, rounds=rounds, round_interval=interval,
-                            continue_on_error=self.chk_continue_on_error.isChecked())
-        worker.hwnd_started.connect(self._on_hwnd_started)
-        worker.task_started.connect(self._on_task_started)
-        worker.task_failed.connect(self._on_task_failed)
-        worker.round_started.connect(self._on_round_started)
-        worker.done.connect(self._on_done)
-        worker.finished.connect(worker.deleteLater)
-
-        self.worker = worker
-        self.mode = "plan"
-        self._stopping = False
-        self._last_error = ""
-        self._current_index = -1
-        self._current_key = None
-
-        if rounds != 1:
-            self._append_log(f"🔁 轮次：{'一直重复' if rounds == 0 else f'{rounds} 轮'}"
-                             f"（间隔 {interval}s）\n")
-
-        # 运行期间暂停自动刷新，避免打断脚本
-        self._auto_refresh_timer.stop()
-        self._update_view(None)
-        self.btn_run.setEnabled(False)
-        self.btn_stop.setEnabled(True)
-        worker.start()
+        return bool(self._row_workers)
 
     def _on_stop(self, key: str | None = None):
+        """立即停止全部运行中的窗口（托盘 / Ctrl+Alt+Q 紧急停止入口）"""
         if not self._is_busy():
             return
-        self.worker.request_stop()
-        self._stopping = True
-        self._update_view(None, stopping=True)
-        self.btn_stop.setEnabled(False)
+        self._stop_all_rows(immediate=True)
         self.statusBar().showMessage("正在停止…")
         self._append_log(f"⏹ [{_now()}] 已请求停止，等待当前操作结束（剩余任务不再执行）…\n")
 
-    def _on_round_started(self, round_index: int, rounds: int):
-        if rounds <= 1:
+    def _scheduled_start(self):
+        """定时触发：为所有已绑定且队列非空的窗口各起一条线程并行执行"""
+        if self._is_busy():
+            self._append_log("⏰ 到点但仍有窗口在运行，跳过本次\n")
             return
-        text = f"第 {round_index} 轮" + ("" if rounds == 0 else f"/{rounds}")
-        self.statusBar().showMessage(f"{text} 开始")
-        self._append_log(f"🔁 [{_now()}] {text}开始\n")
-
-    def _on_hwnd_started(self, hwnd: int, queue_name: str):
-        self._active_hwnd = hwnd
-        self.statusBar().showMessage(f"正在执行：hwnd={hwnd} · 队列「{queue_name}」")
-        self._append_log(f"🎯 [{_now()}] 窗口 hwnd={hwnd} 开始执行队列「{queue_name}」\n")
-
-    def _on_task_started(self, index: int, key: str):
-        self._current_index = index
-        self._current_key = key
-        spec = self.cards[key].spec
-        # 从计划里取「当前窗口队列」中这个任务的参数
-        params = {}
-        if self.worker is not None:
-            current = [entry for entry in self.worker.plan if entry[0] == self._active_hwnd]
-            if current and 0 <= index < len(current[0][2]):
-                params = current[0][2][index][1]
-
-        self._active_task = spec.title
-        if key == "auto_task" and params.get("task_name"):
-            self._update_ocr_history(params["task_name"])
-
-        self._update_view(key)
-        extra = _fmt_params(params)
-        self.statusBar().showMessage(f"正在执行：{spec.title}")
-        self._append_log(f"▶ [{_now()}] ({index + 1}) {spec.title}{'  ' + extra if extra else ''}\n")
-
-    def _on_task_failed(self, index: int, key: str, message: str):
-        title = self.cards[key].spec.title
-        self._last_error = message
-        self._append_log(f"❌ [{_now()}] 任务异常：{title}\n{message}\n")
-        if self.chk_continue_on_error.isChecked():
-            self._append_log(f"⏭ 出错继续：跳过「{title}」，执行后面的任务\n")
-            return
-        last_line = message.strip().splitlines()[-1] if message.strip() else "未知错误"
-        QMessageBox.warning(self, "任务异常", f"「{title}」执行失败，计划已中断：\n{last_line}")
-
-    def _on_done(self, ok: bool, message: str):
-        self.worker = None
-        self.mode = None
-        self._active_task = ""
-        self._active_hwnd = None
-        self._update_view(None)
-        self._update_run_button()
-        self.btn_stop.setEnabled(False)
-        self.queue_progress.setText("")
-        # 空闲了再恢复自动刷新
-        if self.chk_auto_refresh.isChecked():
-            self._auto_refresh_timer.start()
-
-        if not ok and message and message != self._last_error:
-            self._append_log(f"❌ [{_now()}] 执行失败：\n{message}\n")
-            QMessageBox.warning(self, "执行失败", message.strip().splitlines()[-1])
-            self.statusBar().showMessage("执行失败，详见日志")
-        elif self._stopping:
-            self._append_log(f"⏹ [{_now()}] 已停止\n")
-            self.statusBar().showMessage("已停止")
-        elif ok:
-            self._append_log(f"✅ [{_now()}] 计划执行完成\n")
-            self.statusBar().showMessage("计划执行完成")
+        started = 0
+        for hwnd, queue_name in self.bindings.items():
+            tasks = [(item["key"], dict(item.get("params") or {}))
+                     for item in self.queues.get(queue_name, [])]
+            if not tasks:
+                continue
+            self._start_row_worker(hwnd, queue_name, tasks)
+            started += 1
+        if started:
+            self._append_log(f"⏰ 定时触发，{started} 个窗口开始并行执行\n")
         else:
-            self.statusBar().showMessage("任务异常，详见日志")
-
-        self._stopping = False
-
-    def _update_view(self, running_key: str | None, stopping: bool = False):
-        """统一刷新卡片状态 + 进度标签"""
-        busy = running_key is not None
-        for key, card in self.cards.items():
-            if key == running_key:
-                card.set_state("stopping" if stopping else "running")
-            else:
-                card.set_locked(busy)
-
-        if busy and self.worker is not None and self._active_hwnd is not None:
-            current = [entry for entry in self.worker.plan if entry[0] == self._active_hwnd]
-            if current:
-                total = len(current[0][2])
-                self.queue_progress.setText(f"hwnd={self._active_hwnd} {self._current_index + 1}/{total}")
-        elif not busy:
-            self.queue_progress.setText("")
+            self._append_log("⏰ 到点但没有可执行的计划（先在行内选好绑定队列），跳过本次\n")
 
     # ---------- 托盘 / 热键 / 定时 ----------
 
@@ -1533,16 +1524,6 @@ class MainWindow(QMainWindow):
             schedule.run_pending()
         except Exception as e:
             self._append_log(f"❌ 定时任务执行失败：{e}\n")
-
-    def _scheduled_start(self):
-        if self._is_busy():
-            self._append_log("⏰ 到点但计划仍在运行，跳过本次\n")
-            return
-        if not self._build_plan_items():
-            self._append_log("⏰ 到点但没有可执行的计划（先绑定窗口），跳过本次\n")
-            return
-        self._append_log("⏰ 定时触发，开始执行计划\n")
-        self._start_plan()
 
     # ---------- 日志 ----------
 
@@ -1642,8 +1623,10 @@ class MainWindow(QMainWindow):
             if answer != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
-            self.worker.request_stop()
-            self.worker.wait(10000)
+            for entry in self._row_workers.values():
+                entry["worker"].request_stop()
+            for entry in self._row_workers.values():
+                entry["worker"].join(5)
         for hwnd in list(self._identify_overlays):
             self._close_identify(hwnd)
         self._save_settings()

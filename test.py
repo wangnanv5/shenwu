@@ -11,4 +11,4 @@ if __name__ == '__main__':
     # game_controller.bao_ta(0,count=50)
     game_controller.run_xun_you(run_all=True)
 
-    # game_controller.reset_round()
+    # game_controller.reset_round() 

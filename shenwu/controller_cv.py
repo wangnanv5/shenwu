@@ -1,8 +1,6 @@
 import functools
 import os
-import re
 import threading
-import time
 from enum import Enum, auto
 
 import traceback
@@ -13,10 +11,25 @@ import cv2
 import numpy as np
 from munch import DefaultMunch
 
+from shenwu.capture import capture_client_only
 from shenwu.config import *
+from shenwu.game_window import (
+    SHELL_WINDOW_CLASSES, get_physical_client_rect, make_region, parse_game_title, restore_window,
+)
 from shenwu.resource import GameResource
+from shenwu.tasks.bao_ta import (  # 重导出：旧引用仍然可用
+    BaoTaTasks, bao_ta_diff_interval, bao_ta_min_area, bao_ta_max_area,
+    bao_ta_timeout, bao_ta_diff_thresh, bao_ta_mask_top, bao_ta_mask_bottom,
+    bao_ta_mask_left, bao_ta_mask_right, make_bao_ta_mask,
+)
+from shenwu.tasks.bao_tu import BaoTuTasks, wa_bao_round_gap
+from shenwu.timing import TaskTerminated, human_delay, is_stopped, terminate_event
+from shenwu.utils import get_abs_x_y_cv_windows
+from shenwu.vision import find_all_match, find_best_match, generate_grid_mask, get_color
+from shenwu.win_input import (
+    hotkey, press_key, windows_click, windows_key, windows_move_to, windows_right_click,
+)
 from shenwu.yolo_detector import DEFAULT_ONNX_MODEL, YoloDetector
-from shenwu.utils import *
 
 ROI = (0, 0, 800, 600)
 
@@ -30,48 +43,12 @@ fish_width_end = 440
 fish_height_start = 100
 fish_height_end = 180
 
-# 宝塔检测（帧间差分找动态目标）参数，来自 legacy/test_only copy.py
-bao_ta_diff_interval = 0.12  # 差分时间窗（秒），0.10 ~ 0.15 秒动态最明显
-bao_ta_min_area = 100        # 最小运动轮廓面积（过滤噪点）
-bao_ta_max_area = 12000      # 最大运动轮廓面积（过滤大面积刷新）
-bao_ta_timeout = 30.0        # 检测超时（秒），超时未找到返回 None
-bao_ta_diff_thresh = 25      # 帧间差分二值化阈值（0-255）
-
-# 中央台面 ROI 掩膜比例：屏蔽顶部状态栏与底部聊天栏，只检测台面区域。
-# 可用 test_bao_ta_mask 实时调参验证后再回填这里。
-bao_ta_mask_top = 0.08       # 上边界（高度比例）
-bao_ta_mask_bottom = 0.75    # 下边界
-bao_ta_mask_left = 0.10      # 左边界（宽度比例）
-bao_ta_mask_right = 0.90     # 右边界
-
 # 开背包（点击 bag_small）参数
 open_bag_retries = 3       # 定位+点击的最大尝试次数
 open_bag_check_rounds = 3  # 每次点击后确认 is_open_bag 的轮数
 open_bag_check_gap = 0.3   # 确认轮询间隔（秒）
 
-# 挖宝 YOLO 检测参数
-wa_bao_round_gap = 3.0     # 每轮所有目标点完后的等待秒数，再进下一轮检测
-
-def make_bao_ta_mask(shape, top=None, bottom=None, left=None, right=None):
-    """构造宝塔检测的中央台面 ROI 掩膜（与 _detect_bao_ta 实际使用的完全一致）
-
-    :param shape: 帧的 (h, w) 或完整 shape
-    :param top/bottom/left/right: 四边裁剪比例（0~1），缺省用模块级
-                                  bao_ta_mask_* 常量
-    :return: (mask, rect) —— mask 为 uint8 单通道（白=参与检测区域）；
-             rect=(x1, y1, x2, y2) 为覆盖范围的像素坐标
-    """
-    top = bao_ta_mask_top if top is None else top
-    bottom = bao_ta_mask_bottom if bottom is None else bottom
-    left = bao_ta_mask_left if left is None else left
-    right = bao_ta_mask_right if right is None else right
-
-    h, w = shape[:2]
-    x1, y1 = int(w * left), int(h * top)
-    x2, y2 = int(w * right), int(h * bottom)
-    mask = np.zeros((h, w), dtype=np.uint8)
-    mask[y1:y2, x1:x2] = 255
-    return mask, (x1, y1, x2, y2)
+# 宝塔/挖宝的识别参数与单窗口流程在 shenwu/tasks/ 下（顶部已导入并重导出）
 
 # 修业任务类型(与 resource 图标列表顺序一一对应)
 class XiuYeTaskType(Enum):
@@ -82,34 +59,7 @@ class XiuYeTaskType(Enum):
     TIAO_ZHAN_SHOU_XI = auto() # 挑战收悉(与挑战同样走战斗流程)
     TONG_MEN = auto()          # 援助同门
 
-# 真正的游戏窗口标题固定为「幻唐志 - <服务器名>」，服务器名动态变化、可同时存在多个。
-# 只认这种格式，避免把资源管理器目录（标题恰好叫「幻唐志」）或本 GUI 窗口当成游戏窗口
-GAME_TITLE_PATTERN = re.compile(r"^\s*幻唐志\s*[-–—－]\s*(?P<server>\S.*?)\s*$")
-
-# 资源管理器 / 桌面等壳窗口：即使标题碰巧带「-」也不是游戏窗口
-SHELL_WINDOW_CLASSES = {"CabinetWClass", "ExploreWClass", "Progman", "WorkerW",
-                        "Shell_TrayWnd", "Shell_SecondaryTrayWnd"}
-
-# 打开名为「幻唐志」的文件夹时，资源管理器标题会是「幻唐志 - 文件资源管理器」，
-# 格式上与游戏窗口完全一致，只能靠窗口类 + 这个服务器名黑名单双保险排除
-SHELL_TITLE_BLACKLIST = {"文件资源管理器", "资源管理器", "File Explorer",
-                         "Windows Explorer"}
-
-
-def parse_game_title(title):
-    """严格匹配「幻唐志 - xxx」，返回服务器名；不匹配返回 None"""
-    if not title:
-        return None
-    # 渲染窗口标题带 RENDER，历史逻辑一直是排除的
-    if "RENDER" in title.upper():
-        return None
-    match = GAME_TITLE_PATTERN.match(title)
-    if match is None:
-        return None
-    server = match.group("server").strip()
-    if not server or server in SHELL_TITLE_BLACKLIST:
-        return None
-    return server
+# 窗口标题解析与排除规则见 shenwu.game_window（parse_game_title 等）
 
 
 # 修炼任务类型(与 resource 图标列表顺序一一对应)
@@ -118,18 +68,19 @@ class XiuLianTaskType(Enum):
     ZHAO_REN = auto()     # 找人
     FENG_DAO_REN = auto() # 疯道人(封到人)
 
-def is_stopped(stop_event):
-    """GUI 用来中断长循环的标志位；stop_event 为 None 时永不停止（命令行行为不变）"""
-    return stop_event is not None and stop_event.is_set()
-
-
 @functools.lru_cache(maxsize=1)
 def get_controller():
     """懒加载单例：__init__ 会枚举窗口并加载图标，放到导入期会导致 --help 也必须开游戏"""
     return GameController()
 
 
-class GameController:
+class GameController(BaoTaTasks, BaoTuTasks):
+    """业务流程编排：窗口管理 + 公共能力 + 按任务拆分的 Mixin。
+
+    Mixin 只负责单窗口业务顺序（见 shenwu/tasks/），本类提供它们依赖的
+    grab_frame / find / find_all / click_match / wait_until / is_open_* 等能力。
+    """
+
     def __init__(self):
         self.hwnd_list = []
 
@@ -614,109 +565,6 @@ class GameController:
         print("❌ 背包打开失败")
         return False
 
-    def open_si_nan(self, hwnd_index=0):
-        try:
-            return self._open_si_nan_hwnd(self.hwnd_list[hwnd_index])
-        except Exception:
-            traceback.print_exc()
-            return False
-
-    def _find_si_nans(self, hwnd):
-        """检测界面上所有司南图标，返回按匹配分数降序的 match 列表"""
-        region = make_region(hwnd)
-        frame = self.grab_frame(region, "gray")
-        return self.find_all(frame, self.resource.si_nan_icon)
-
-    def _open_si_nan_hwnd(self, hwnd, match=None):
-        """按 hwnd 右键点击「司南」图标。
-
-        match 不给时自动检测并取匹配分数最高的一个；给了则直接右键该目标
-        （供 bao_tu 循环逐个点击已记录的司南坐标复用）。
-
-        纯消息级、只读写自己 hwnd 的状态，线程安全，可多窗口并行调用。
-        返回 True 表示已右键；自动检测模式下未找到目标返回 False。
-        """
-        if match is None:
-            matches = self._find_si_nans(hwnd)
-            if not matches:
-                print("❌ 未找到司南图标")
-                return False
-            if len(matches) > 1:
-                print(f"🔍 检测到 {len(matches)} 个司南图标，点击分数最高的一个")
-            match = matches[0]
-
-        # 右键点击：先消息级悬停到位再右键，点完把光标移开，防止悬停框遮挡
-        x, y = get_abs_x_y_cv_windows(match["bbox"])
-        windows_move_to(hwnd, x, y)
-        windows_right_click(hwnd, x, y)
-        windows_move_to(hwnd, 200, 200)
-
-        print(f"✅ 已右键点击司南图标 ({x}, {y})")
-        return True
-
-    def _snap_si_nan(self, hwnd, target, used=None, tolerance=30):
-        """重新检测司南，返回距 target 最近且未被点击过的目标（match）；无目标返回 None。
-
-        挖宝过程中界面可能滚动/移动导致旧坐标失效，每次右键前先吸附到当前位置。
-        used: 本次流程已点击过的中心坐标列表；与其距离在 tolerance 像素内的候选
-        会被排除，避免界面位移后把已处理的目标再次吸附回来（重复挖宝）。
-        """
-        matches = self._find_si_nans(hwnd)
-        if not matches:
-            return None
-
-        candidates = [(get_abs_x_y_cv_windows(m["bbox"]), m) for m in matches]
-        if used:
-            candidates = [((cx, cy), m) for (cx, cy), m in candidates
-                          if all((cx - ux) ** 2 + (cy - uy) ** 2 > tolerance ** 2
-                                 for ux, uy in used)]
-        if not candidates:
-            return None
-        return min(candidates, key=lambda item: (item[0][0] - target[0]) ** 2
-                                               + (item[0][1] - target[1]) ** 2)[1]
-
-    def _wa_bao_yolo(self, hwnd_index=0, stop_event=None):
-        """_wa_bao_yolo_hwnd 的按窗口序号封装"""
-        return self._wa_bao_yolo_hwnd(self.hwnd_list[hwnd_index], stop_event)
-
-    def _wa_bao_yolo_hwnd(self, hwnd, stop_event=None):
-        """挖宝(YOLO)：截图 -> YOLO 检测 -> 逐一消息级点击所有目标 -> 等 3 秒进下一轮。
-
-        某轮未检测到任何目标时返回 None（调用方借此切到下一个司南），
-        收到停止信号同样返回 None 结束。
-        YOLO 按彩色帧训练，必须传 grab_frame(region, "bgr") 的 BGR 帧。
-        """
-        if self.yolo is None:
-            print("❌ YOLO 模型未加载，挖宝任务无法执行")
-            return None
-
-        region = make_region(hwnd)
-
-        round_no = 0
-        while not is_stopped(stop_event):
-            round_no += 1
-
-            # 1. 截图并检测
-            frame = self.grab_frame(region, "bgr")
-            dets = self.yolo.detect(frame)
-
-            # 2. 本轮无目标：返回 None，该司南挖宝结束
-            if not dets:
-                print(f"🔍 第 {round_no} 轮未检测到目标，该司南挖宝结束")
-                return None
-
-            # 3. 逐一记录并点击所有目标（bbox 为帧内坐标，click_match 转消息级点击）
-            print(f"🔍 第 {round_no} 轮检测到 {len(dets)} 个目标")
-            for i, (x1, y1, x2, y2, conf, cid) in enumerate(dets):
-                bbox = (x1, y1, x2 - x1, y2 - y1)
-                self.click_match({"bbox": bbox}, region, delay=0.2)
-
-            # 4. 所有目标点完，等 3 秒再进行下一轮
-            human_delay(wa_bao_round_gap)
-
-        print("⏹ 收到停止信号，挖宝结束")
-        return None
-
     # ---------- 业务流程 ----------
 
     def _run_for_all(self, stop_event, runner, task_name, finish_key):
@@ -1082,14 +930,11 @@ class GameController:
                     print("开始修业裂痕任务")
 
                     def click_task_and_wait():
-                        print("开始寻路")
                         windows_click(hwnd, xiu_ye_x, xiu_ye_y)
                         human_delay(3)
 
-                    self.wait_until(region, self.is_has_xun_lu,action=click_task_and_wait, action_first=True,want=False)
+                    self.wait_until(region, self.is_has_xun_lu,action=click_task_and_wait, action_first=True)
                     # 寻路结束
-                    print("寻路结束")
-
                     human_delay(3)
                     frame = self.grab_frame(region)
                     # 共三种情况
@@ -1101,20 +946,20 @@ class GameController:
                         self.wait_until(region, self.is_in_fight, want=False, lead=0.1)
                         human_delay(0.5)
                         self.wait_until(region, self.is_has_talk, lead=1,want=False,action=lambda: self.close_talk(region))
-                        continue    
+                        continue
 
                     # 第二种寻路结束后直接完成任务
                     # 第三种还需要进行二次战斗
-                    # self.wait_until(region, self.is_has_talk, lead=1,want=False,
-                    #                 action=lambda: self.close_talk(region))
+                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
+                                    action=lambda: self.close_talk(region))
                     
-                    # self.reset_round(hwnd_index)
+                    self.reset_round(hwnd_index)
 
-                    # self.wait_until(region, self.is_in_fight, want=False, lead=2)
-                    # human_delay(0.2)
+                    self.wait_until(region, self.is_in_fight, want=False, lead=2)
+                    human_delay(0.2)
 
-                    # self.wait_until(region, self.is_has_talk, lead=1,want=False,
-                    #                     action=lambda: self.close_talk(region))
+                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
+                                        action=lambda: self.close_talk(region))
                 else:
                     print("❌ 未知任务类型")
             except Exception:
@@ -1405,119 +1250,6 @@ class GameController:
         return True
 
     # 玲珑宝塔
-    def _detect_bao_ta(self, hwnd, stop_event=None, timeout=None):
-        if timeout is None:
-            timeout = bao_ta_timeout
-
-        prev_gray = None
-        last_check = time.monotonic()
-
-        while not is_stopped(stop_event):
-            if time.monotonic() - last_check < bao_ta_diff_interval:
-                human_delay(0.05)
-                continue
-
-            frame = self.grab_frame(hwnd)
-
-            gray = cv2.GaussianBlur(frame, (5, 5), 0)
-
-            if prev_gray is None:
-                prev_gray = gray
-                last_check = time.monotonic()
-                continue
-
-            diff = cv2.absdiff(prev_gray, gray)
-
-            # 中央台面 ROI 掩膜：屏蔽顶部状态栏与底部聊天栏
-            roi_mask, _ = make_bao_ta_mask(diff.shape[:2])
-            diff = cv2.bitwise_and(diff, diff, mask=roi_mask)
-
-            # 阈值二值化与形态学膨胀
-            _, thresh = cv2.threshold(diff, bao_ta_diff_thresh, 255, cv2.THRESH_BINARY)
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
-            dilated = cv2.dilate(thresh, kernel, iterations=2)
-
-            # 寻找运动轮廓，按面积与宽高比过滤候选
-            contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            candidates = []
-            for cnt in contours:
-                area = cv2.contourArea(cnt)
-                if bao_ta_min_area < area < bao_ta_max_area:
-                    x, y, bw, bh = cv2.boundingRect(cnt)
-                    if 0.5 < bw / bh < 2.0:
-                        candidates.append((area, (x, y, bw, bh)))
-
-            if candidates:
-                # 取动态面积最大的连通块作为目标
-                candidates.sort(key=lambda item: item[0], reverse=True)
-                return candidates[0][1]
-
-            # 未命中：推进帧对比基准，继续下一轮
-            prev_gray = gray
-            last_check = time.monotonic()
-
-        return None
-
-    def bao_ta(self,hwnd_index=0,count=10, stop_event=None,):
-        if not 0 <= hwnd_index < len(self.hwnd_list):
-            raise IndexError(
-                f"hwnd_index={hwnd_index} 超出范围，当前游戏窗口数: {len(self.hwnd_list)}")
-        hwnd = self.hwnd_list[hwnd_index]
-        restore_window(hwnd)
-        _count = 0
-
-        while _count < count and not is_stopped(stop_event):
-            # 如果此层已经通关,一直点击
-            while not is_stopped(stop_event):
-                frame = self.grab_frame(hwnd)
-                human_delay(0.1)
-                if self.find(frame,self.resource.bao_ta_tong_guan_icon,0.9):
-                    match = self.find(frame,self.resource.bao_ta_an_niu_icon)
-                    abs_x, abs_y = get_abs_x_y_cv_windows(match["bbox"])
-                    windows_click(hwnd,abs_x,abs_y)
-                    human_delay(0.5)
-                else:
-                    break
-
-            # 如果一直没有开始挑战按钮,则一直等待
-            while not is_stopped(stop_event):
-                # 检测宝塔战斗目标,等待一会,不然每次战斗完会有弹窗
-                human_delay(3)
-                bbox = self._detect_bao_ta(hwnd, stop_event)
-                if bbox is None:
-                    print("❌ 动态目标检测超时，未找到动态目标")
-                    return None
-                
-                print("✅ 检测到动态目标")
-                human_delay(0.1)
-                abs_x, abs_y = get_abs_x_y_cv_windows(bbox)
-                windows_click(hwnd,abs_x,abs_y)
-                human_delay(3)
-
-                frame = self.grab_frame(hwnd)
-
-                item_que_ding_match = self.find(frame,self.resource.bao_ta_kai_shi_tiao_zhan_icon)
-                if item_que_ding_match:
-                    abs_x, abs_y = get_abs_x_y_cv_windows(item_que_ding_match["bbox"])
-                    windows_click(hwnd,abs_x,abs_y)
-                    human_delay(2)                    
-                    break
-                
-                # 这一步是移动光标，防止被卡住,因为可能会去点击宝箱奖励按钮
-                windows_move_to(hwnd,abs_x,abs_y)
-            self.wait_until(hwnd,self.is_in_fight,want=True)
-            print("宝塔战斗开始")
-            human_delay(2)
-            self.reset_round(hwnd_index)
-            self.wait_until(hwnd,self.is_in_fight,want=False)
-            print("战斗结束")
-            _count += 1
-
-        if is_stopped(stop_event):
-            print(f"⏹ 宝塔任务已停止（完成 {_count}/{count} 层）")
-        else:
-            print(f"✅ 宝塔任务完成（{_count} 层）")
-
     # 测试
     # 诊断用：检测 resource 中所有图标是否出现在当前游戏窗口
     def icon_names(self):

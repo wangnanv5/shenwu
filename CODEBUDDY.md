@@ -36,12 +36,18 @@ uv run python main.py test-get-color --color blue  # 诊断：实时可视化 ge
 | 文件 | 职责 |
 | --- | --- |
 | `main.py` | click CLI 入口 |
-| `shenwu/controller_cv.py` | `GameController`，业务流程编排（当前主力实现） |
+| `shenwu/controller_cv.py` | `GameController`：窗口管理 + 公共能力（`grab_frame` / `find` / `wait_until` / `click_match` / `is_open_*`）+ 任务 Mixin 组合 |
+| `shenwu/tasks/` | 按任务拆分的单窗口流程（Mixin）：`bao_ta.py`（帧间差分找动态目标 + 层循环）、`bao_tu.py`（司南 → 右键 → YOLO 挖宝） |
+| `shenwu/timing.py` | 终止信号（全局 + 行级）与 `human_delay` / `rand_secs` / `is_stopped` |
+| `shenwu/game_window.py` | 游戏窗口识别（`parse_game_title`、壳窗口排除）、客户区几何、`make_region` |
+| `shenwu/vision.py` | 模板匹配（`find_best_match` / `find_all_match`）、颜色与格子识别（纯计算，无 IO） |
+| `shenwu/win_input.py` | 键鼠输入：消息级 PostMessage 与真实注入两条通道 |
+| `shenwu/capture.py` | WGC 客户区截图（`capture_client_only`），窗口可被遮挡 |
+| `shenwu/utils.py` | **兼容层**：重导出上述能力（旧 import 路径不变）+ 少量通用杂项（`get_abs_x_y*`、legacy 截图） |
 | `shenwu/resource.py` | `GameResource`，集中加载 33 个模板图标 |
 | `shenwu/config.py` | 图标文件路径（`resource/` 下的 PNG） |
-| `shenwu/utils.py` | 窗口/截图/模板匹配/键盘/颜色检测等底层工具 |
 | `shenwu/ocr.py` | `Ocr`，RapidOCR 封装，`get_ocr_from_image(img, target_texts)` 按目标文本过滤 |
-| `shenwu/gui/` | PyQt6 界面：`main_window.py`(队列面板/卡片/窗口表/托盘) / `workers.py`(QThread，按计划逐窗口执行) / `theme.py`(QSS) / `settings.py`(json 配置) / `app_icon.py`(Pillow 现画的应用图标) |
+| `shenwu/gui/` | PyQt6 界面：`main_window.py`(装配/队列面板/窗口表/托盘) / `tasks.py`(任务卡片与清单) / `workers.py`(行线程与任务派发) / `theme.py`(QSS + repolish) / `settings.py`(json 配置) / `app_icon.py`(Pillow 现画的应用图标) |
 | `shenwu/windows_utils.py` | `Win32BorderWithLabel`：给指定 hwnd 画彩色边框 + 文字标签（需外部循环调 `update_position()` 泵消息）；另有 `enumerate_windows()` / `get_render_color()` |
 | `legacy/` | 旧版 OCR 实现 `controller.py` 和几个临时脚本，**只读参考，不再维护** |
 
@@ -67,7 +73,7 @@ uv run python main.py test-get-color --color blue  # 诊断：实时可视化 ge
 
 ⚠️ `Win32BorderWithLabel` 的窗口类名必须是**每实例唯一**（`..._{id(self)}`）：pywin32 的 `WNDCLASS` 注册后绑定的是那一个 `wnd_proc`，共用类名会让所有覆盖层的消息都派发到第一个实例（内容画错 + `WM_DESTROY` 重复 `DeleteObject` 报错）。
 
-**立即终止**：`utils.terminate_event` 是全局终止信号；`human_delay` 按 ≤0.1s 分片睡眠并在每片检查，置位后立刻抛 `TaskTerminated`（继承 **BaseException**，专门绕过业务里 `except Exception` 的逐窗口兜底）。GUI 的 `TaskWorker.request_stop()` 同时置 worker 标志与该信号；worker `run()` 开头 `clear_terminate()`，外层 `except TaskTerminated` 打印后经 `finally` 恢复运行目标并 `done`。命令行从不置位，行为不变。代价：终止会把任务留在中间状态（背包可能没关等），这是「立即终止」的固有语义。
+**立即终止**：`timing.terminate_event` 是全局终止信号；`human_delay` 按 ≤0.1s 分片睡眠并在每片检查，置位后立刻抛 `TaskTerminated`（继承 **BaseException**，专门绕过业务里 `except Exception` 的逐窗口兜底）。GUI 单行「停止」走行级事件（`bind_thread_terminate`），只打断该线程；「全部停止」额外置全局信号。`RowWorker.run()` 开头 `clear_terminate()`，否则上一次紧急停止会让后续任务刚启动就退出。代价：终止会把任务留在中间状态（背包可能没关等），这是「立即终止」的固有语义。
 
 **humancursor 边界补丁**：`generate_random_curve_parameters` 在点击坐标落在 `pyautogui.size()` 的 15%~85% 区间外（多开铺到副屏/负坐标区）时会把 `offset_boundary_x/y` 置 0；此时若鼠标已在目标点，`range(l, r)` 为空，库内回退 `np.random.choice(l_boundary)`，负坐标下抛 `ValueError: a must be greater than 0`。`utils.py` 里用 `_safe_generate_internal_knots` 替换了 `HumanizeMouseTrajectory.generate_internal_knots`：空范围以左边界撑开 1 像素，采样区间恒非空。改 humancursor 行为只能改这里，不要去动 site-packages。
 
@@ -87,7 +93,7 @@ uv run python main.py test-get-color --color blue  # 诊断：实时可视化 ge
 
 **流程写法**：业务流程 = 一串 `wait_until` 调用。每个页面判断方法（`is_has_talk` 等）都是一行 `self.find(...) is not None`，它们既用于 `if`，也作为 predicate 传给 `wait_until`。
 
-**延迟有两个函数**（`utils.py`）：`human_delay(x)` 只睡眠（绝大多数场景）；`rand_secs(x)` 只返回随机秒数（给 `pyautogui.moveTo(duration=...)` 这类要值的参数用）。别把 `human_delay` 的返回值当数字用。
+**延迟有两个函数**（`timing.py`，`utils` 兼容重导出）：`human_delay(x)` 只睡眠（绝大多数场景）；`rand_secs(x)` 只返回随机秒数（给 `pyautogui.moveTo(duration=...)` 这类要值的参数用）。别把 `human_delay` 的返回值当数字用。
 
 **OCR 是懒加载的**：`self.ocr` 是 `cached_property`，构造 `Ocr()` 会加载 ONNX 模型，别挪进 `__init__`。
 
@@ -95,7 +101,7 @@ uv run python main.py test-get-color --color blue  # 诊断：实时可视化 ge
 
 - `run_auto_task` / `run_fish` 是另一套实现（PIL `ImageGrab` + OCR/模板），OCR 任务已改成遍历 `hwnd_list`，钓鱼仍只用第一个窗口
 - `get_color` 里裁剪比例（0.66/0.27 ~ 0.95/0.38）是硬编码的（虽然按帧宽高比例计算，但绑定修炼任务面板布局）；`generate_grid_mask` 的比例切片（0.478/0.191 ~ 0.783/0.830）和 800~3000 像素面积过滤同样绑定当前分辨率，换窗口尺寸要一起调
-- `utils.py` 中 `check_is_frozen` / `get_abs_x_y` / `get_hwnd_image` / `open_item_shop_keyboard` / `launch_game` 主链路已不用，只为 `legacy/` 保留
+- `utils.py` 中 `check_is_frozen` / `get_abs_x_y` / `get_hwnd_image` 主链路已不用，只为 `legacy/` 保留（其余能力已迁至 timing / game_window / vision / win_input / capture）
 - `run_fish` 走的是另一套识别路径（PIL `ImageGrab` + `pyautogui.locate`，不是 mss + cv2），只用第一个窗口
 
 ## 约定

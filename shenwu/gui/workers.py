@@ -96,7 +96,7 @@ class RowWorker(threading.Thread):
         self.terminate_event.set()
 
     def run(self):
-        from shenwu.utils import TaskTerminated, bind_thread_terminate, clear_terminate
+        from shenwu.timing import TaskTerminated, bind_thread_terminate, clear_terminate
 
         # 上一次「全部停止 / 紧急停止」置位的全局信号必须在这里复位：否则本轮任务
         # 第一个 human_delay 就会抛 TaskTerminated，表现为「刚运行就自己停了」。

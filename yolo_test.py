@@ -1,8 +1,5 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
-"""桌面窗口实时目标检测预览（YOLOv8 ONNX end2end 版）。
-
-检测逻辑在 shenwu/yolo_detector.py 的 YoloDetector 类里；本文件只负责
-「选窗口 -> 截帧 -> 调检测 -> 画框预览」，不含模型推理实现。
+"""桌面窗口实时目标检测（YOLOv8 ONNX end2end 版）。
 
 用法示例：
     uv run python yolo_test.py --list                 # 列出所有可选窗口
@@ -24,12 +21,8 @@ import time
 import cv2
 import mss
 import numpy as np
+import onnxruntime as ort
 import win32gui
-
-from shenwu.yolo_detector import DEFAULT_ONNX_MODEL, YoloDetector
-
-# 预览用随机配色，按 class_id 取色
-_COLOR_PALETTE = np.random.uniform(0, 255, size=(len(YoloDetector.classes), 3))
 
 # ---------------------------------------------------------------------------
 # DPI：命令行进程设置 PER_MONITOR_AWARE(2)，保证 GetClientRect / ClientToScreen
@@ -108,19 +101,106 @@ class WindowCapture:
             return None
 
 
-def _draw_detections(img: np.ndarray,
-                     dets: list[tuple[float, float, float, float, float, int]]) -> np.ndarray:
-    """在图上绘制边界框和标签（预览专用，直接修改并返回 img）。"""
-    for x1, y1, x2, y2, conf, cid in dets:
-        color = _COLOR_PALETTE[cid].tolist()
-        cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+class YOLOv8:
+    """YOLOv8 ONNX 检测器（end2end 输出 (N, 6)，NMS 已在图内完成）。
 
-        label = f"{YoloDetector.classes[cid]}: {conf:.2f}"
-        (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        ly = int(y1 - 10) if y1 - 10 > lh else int(y1 + 10)
-        cv2.rectangle(img, (int(x1), ly - lh), (int(x1 + lw), ly + lh), color, cv2.FILLED)
-        cv2.putText(img, label, (int(x1), ly), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
-    return img
+    与原静态图版本的差别：session 在 __init__ 只创建一次；输入帧由外部
+    传入；postprocess 拆成「还原坐标得到检测列表」+「独立绘制」两步，
+    便于帧间隔期间复用上一次检测结果。
+    """
+
+    def __init__(self, onnx_model: str, confidence_thres: float, iou_thres: float):
+        self.onnx_model = onnx_model
+        self.confidence_thres = confidence_thres
+        self.iou_thres = iou_thres  # end2end 模型图内已做 NMS，仅保留参数兼容
+
+        self.classes = ['icon']
+        self.color_palette = np.random.uniform(0, 255, size=(len(self.classes), 3))
+        self._last_size: tuple[int, int] | None = None  # 上一次检测的帧尺寸（用于尺寸变化时立即重推）
+
+        available = ort.get_available_providers()
+        providers = [p for p in ("CUDAExecutionProvider", "CPUExecutionProvider") if p in available]
+        self.session = ort.InferenceSession(onnx_model, providers=providers or available)
+        print(f"✅ 模型加载完成，推理后端：{self.session.get_providers()}")
+
+        model_inputs = self.session.get_inputs()
+        _, _, height, width = model_inputs[0].shape
+        self.input_height = height if isinstance(height, int) else 640
+        self.input_width = width if isinstance(width, int) else 640
+
+    def letterbox(self, img: np.ndarray, new_shape: tuple[int, int] = (640, 640)) -> tuple[np.ndarray, tuple[int, int]]:
+        """保持长宽比缩放并补边，返回 (图, (top, left) padding)。"""
+        shape = img.shape[:2]
+
+        r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+
+        new_unpad = round(shape[1] * r), round(shape[0] * r)
+        dw, dh = (new_shape[1] - new_unpad[0]) / 2, (new_shape[0] - new_unpad[1]) / 2
+
+        if shape[::-1] != new_unpad:
+            img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
+        top, bottom = round(dh - 0.1), round(dh + 0.1)
+        left, right = round(dw - 0.1), round(dw + 0.1)
+        img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
+
+        return img, (top, left)
+
+    def detect(self, frame: np.ndarray) -> list[tuple[float, float, float, float, float, int]]:
+        """对一帧 BGR 图做检测，返回 [(x1, y1, x2, y2, conf, class_id), ...]（原图坐标）。"""
+        h0, w0 = frame.shape[:2]
+
+        img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img, pad = self.letterbox(img, (self.input_height, self.input_width))
+
+        image_data = np.asarray(img) / 255.0
+        image_data = np.transpose(image_data, (2, 0, 1))  # Channel first
+        image_data = image_data[None].astype(np.float32)
+
+        outputs = self.session.run(None, {self.session.get_inputs()[0].name: image_data})
+        return self._postprocess(outputs, pad, (w0, h0))
+
+    def _postprocess(self, output: list[np.ndarray], pad: tuple[int, int],
+                     orig_size: tuple[int, int]) -> list[tuple[float, float, float, float, float, int]]:
+        """(1, 300, 6) end2end 输出：[x1, y1, x2, y2, conf, cls]，还原到原图坐标。"""
+        w0, h0 = orig_size
+        det = np.squeeze(output[0])                  # (300, 6)，不要 transpose！
+        if det.ndim != 2 or det.shape[1] != 6:
+            raise RuntimeError(f"预期 (N, 6) 输出，实际 {det.shape}")
+
+        # 1) 按置信度过滤
+        det = det[det[:, 4] >= self.confidence_thres]
+        if det.size == 0:
+            return []
+
+        boxes = det[:, :4].astype(np.float32)        # xyxy，letterbox 640 空间
+        confs = det[:, 4]
+        cls_ids = det[:, 5].astype(int)
+
+        # 2) letterbox 坐标 → 原图坐标（扣 padding，再除以缩放比）
+        gain = min(self.input_height / h0, self.input_width / w0)
+        boxes[:, [0, 2]] = (boxes[:, [0, 2]] - pad[1]) / gain
+        boxes[:, [1, 3]] = (boxes[:, [1, 3]] - pad[0]) / gain
+
+        # 3) 裁剪到图像范围内
+        boxes[:, [0, 2]] = boxes[:, [0, 2]].clip(0, w0 - 1)
+        boxes[:, [1, 3]] = boxes[:, [1, 3]].clip(0, h0 - 1)
+
+        return [(x1, y1, x2, y2, float(c), int(cid))
+                for (x1, y1, x2, y2), c, cid in zip(boxes, confs, cls_ids)]
+
+    def draw_detections(self, img: np.ndarray,
+                        dets: list[tuple[float, float, float, float, float, int]]) -> np.ndarray:
+        """在图上绘制边界框和标签（直接修改并返回 img）。"""
+        for x1, y1, x2, y2, conf, cid in dets:
+            color = self.color_palette[cid].tolist()
+            cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+
+            label = f"{self.classes[cid]}: {conf:.2f}"
+            (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            ly = int(y1 - 10) if y1 - 10 > lh else int(y1 + 10)
+            cv2.rectangle(img, (int(x1), ly - lh), (int(x1 + lw), ly + lh), color, cv2.FILLED)
+            cv2.putText(img, label, (int(x1), ly), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+        return img
 
 
 def _pick_window(args: argparse.Namespace) -> int | None:
@@ -174,11 +254,10 @@ def _waiting_screen(width: int, height: int, text: str) -> np.ndarray:
     return screen
 
 
-def run_preview(detector: YoloDetector, hwnd: int, title: str, every: int, max_height: int) -> None:
+def run_preview(detector: YOLOv8, hwnd: int, title: str, every: int, max_height: int) -> None:
     """主循环：抓帧 → 推理（每 every 帧一次）→ 绘制 → 预览。"""
     capture = WindowCapture(hwnd)
     dets: list[tuple[float, float, float, float, float, int]] = []
-    last_size: tuple[int, int] | None = None  # 上一次推理的帧尺寸（尺寸变化立即重推）
     window_name = f"YOLO 实时检测 - {title}"
     fps = 0.0
     frame_idx = 0
@@ -201,10 +280,10 @@ def run_preview(detector: YoloDetector, hwnd: int, title: str, every: int, max_h
         else:
             h0, w0 = frame.shape[:2]
             # 窗口尺寸变化或到了推理帧才重新检测，其余帧复用上次结果
-            if frame_idx % every == 0 or last_size != (w0, h0):
+            if frame_idx % every == 0 or detector._last_size != (w0, h0):
                 dets = detector.detect(frame)
-                last_size = (w0, h0)
-            display = _draw_detections(frame.copy(), dets)
+                detector._last_size = (w0, h0)
+            display = detector.draw_detections(frame.copy(), dets)
 
         # 预览窗口过大时等比缩小，避免超出屏幕
         if display.shape[0] > max_height:
@@ -228,8 +307,9 @@ def run_preview(detector: YoloDetector, hwnd: int, title: str, every: int, max_h
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="对指定桌面窗口做 YOLOv8 实时检测")
-    parser.add_argument("--model", type=str, default=DEFAULT_ONNX_MODEL, help="ONNX 模型路径")
+    parser.add_argument("--model", type=str, default=r"C:\Users\27321\Desktop\best.onnx", help="ONNX 模型路径")
     parser.add_argument("--conf-thres", type=float, default=0.5, help="置信度阈值")
+    parser.add_argument("--iou-thres", type=float, default=0.5, help="NMS IoU 阈值（end2end 模型图内已做，仅兼容保留）")
     parser.add_argument("--hwnd", type=lambda v: int(v, 0), default=None, help="目标窗口句柄（支持 0x 前缀）")
     parser.add_argument("--title", type=str, default=None, help="按窗口标题子串匹配（取第一个）")
     parser.add_argument("--list", action="store_true", help="仅列出可见窗口后退出")
@@ -250,7 +330,7 @@ def main() -> None:
         return
 
     title = win32gui.GetWindowText(hwnd) or f"hwnd={hwnd}"
-    detector = YoloDetector(args.model, args.conf_thres)
+    detector = YOLOv8(args.model, args.conf_thres, args.iou_thres)
     run_preview(detector, hwnd, title, max(1, args.every), args.max_height)
 
 

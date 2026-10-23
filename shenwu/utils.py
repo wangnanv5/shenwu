@@ -55,6 +55,25 @@ def clear_terminate():
     terminate_event.clear()
 
 
+# 行级立即终止：后台线程可绑定一个专属事件，human_delay 同样立即打断。
+# 与全局 terminate_event 的区别：只打断绑定了它的那一条线程，其他线程
+# （其他窗口的并行任务）完全不受影响，GUI 的单行「停止」靠它实现。
+_thread_terminate = threading.local()
+
+
+def bind_thread_terminate(event: threading.Event):
+    """给当前线程绑定专属终止事件；human_delay 会同时检查全局与该事件"""
+    _thread_terminate.event = event
+
+
+def _is_terminated() -> bool:
+    """全局终止或当前线程的行级终止任一置位即视为终止"""
+    if terminate_event.is_set():
+        return True
+    ev = getattr(_thread_terminate, "event", None)
+    return ev is not None and ev.is_set()
+
+
 def get_client_rect(hwnd):
     """
     获取窗口客户区的桌面坐标，不包括标题栏和边框
@@ -78,7 +97,7 @@ def human_delay(base_seconds: float, sigma: float = 0.3) -> None:
     """
     deadline = time.monotonic() + rand_secs(base_seconds, sigma)
     while True:
-        if terminate_event.is_set():
+        if _is_terminated():
             raise TaskTerminated("用户请求终止")
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -434,12 +453,15 @@ def find_best_match(image, templ, threshold, scale=None):
 
     return best
 
+# 候选点数上限：低阈值 + 大面积平坦画面时命中点可能上万，先截断再 NMS 防卡顿
+FIND_ALL_MAX_CANDIDATES = 200
+
 def find_all_match(image, templ, threshold, scale=None, nms_iou=0.3):
     """
     在 image 中模板匹配，返回所有命中阈值的结果（同 find_best_match，但不止最佳一个）。
 
     同一目标周围会有一片相邻像素都超过阈值，用简单 NMS 去重，
-    只保留每个目标的局部峰值。
+    只保留每个目标的局部峰值；候选点按分数降序最多取 FIND_ALL_MAX_CANDIDATES 个。
 
     返回:
         [{"bbox": (x, y, w, h), "score": 匹配分数, "scale": 缩放比例}, ...]
@@ -477,8 +499,8 @@ def find_all_match(image, templ, threshold, scale=None, nms_iou=0.3):
     if len(xs) == 0:
         return []
 
-    # 按分数从高到低排序，做 NMS 去掉同一目标的相邻重复命中
-    order = np.argsort(result[ys, xs])[::-1]
+    # 按分数从高到低排序，截断候选后做 NMS 去掉同一目标的相邻重复命中
+    order = np.argsort(result[ys, xs])[::-1][:FIND_ALL_MAX_CANDIDATES]
     kept = []
     for idx in order:
         x, y = int(xs[idx]), int(ys[idx])
@@ -662,7 +684,11 @@ def MAKELPARAM(x, y):
     return win32api.MAKELONG(x, y)
 
 def _check_message_target(hwnd, x, y):
-    """校验 hwnd 有效性与客户区坐标范围，非法参数尽早抛错"""
+    """校验 hwnd 有效性与坐标 16 位范围，非法参数尽早抛错
+
+    点击类函数（windows_click / windows_right_click）还会用 _check_click_target
+    再校验客户区范围；windows_move_to 允许移到窗口外（"把光标挪开"场景）。
+    """
     _check_hwnd(hwnd)
     if not (isinstance(x, int) and isinstance(y, int)):
         raise TypeError(f"坐标必须是整数，收到 x={x!r}, y={y!r}")
@@ -729,7 +755,18 @@ def move_cursor_to(hwnd, x, y, steps=None, interval=0.01):
         sx, sy, ex, ey, steps, interval,
     )
 
+def _check_click_target(hwnd, x, y):
+    """点击专用校验：在 16 位范围之外再校验客户区，越界点击会静默落空，必须尽早报错。
+
+    只用于点击；windows_move_to 允许移动到窗口外（"把光标挪开"的场景）。
+    """
+    _check_message_target(hwnd, x, y)
+    _, _, w, h = win32gui.GetClientRect(hwnd)
+    if not (0 <= x < w and 0 <= y < h):
+        raise ValueError(f"点击坐标超出客户区: ({x}, {y})，客户区 {w}x{h}")
+
 def windows_click(hwnd, x, y):
+    _check_click_target(hwnd, x, y)
     _post_mouse_move(hwnd, x, y)
     human_delay(0.02)
     lparam = MAKELPARAM(x, y)
@@ -739,7 +776,7 @@ def windows_click(hwnd, x, y):
 
 def windows_right_click(hwnd, x, y):
     """向窗口投递一次鼠标右键点击，不用置顶窗口"""
-    _check_message_target(hwnd, x, y)
+    _check_click_target(hwnd, x, y)
     # _post_mouse_move(hwnd, x, y)
     human_delay(0.02)
     lparam = MAKELPARAM(x, y)

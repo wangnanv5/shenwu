@@ -1,4 +1,5 @@
 import sys
+import traceback
 
 import click
 
@@ -37,8 +38,10 @@ def run_auto_reset_round():
         try:
             get_controller().run_auto_reset_round()
             human_delay(5)
-        except Exception as e:
-            print(e)
+        except Exception:
+            # 出错后必须等待，否则会变成无间隔重试的死循环刷屏
+            traceback.print_exc()
+            human_delay(1)
 
 # python main.py run-xun-you
 @cli.command()

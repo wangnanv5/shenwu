@@ -42,6 +42,7 @@ class YoloDetector:
             print("YOLO model loaded, providers: " + ", ".join(self.session.get_providers()))
 
         model_inputs = self.session.get_inputs()
+        self.input_name = model_inputs[0].name  # 缓存输入名，避免每帧查询
         _, _, height, width = model_inputs[0].shape
         self.input_height = height if isinstance(height, int) else 640
         self.input_width = width if isinstance(width, int) else 640
@@ -74,7 +75,7 @@ class YoloDetector:
         image_data = np.transpose(image_data, (2, 0, 1))  # Channel first
         image_data = image_data[None].astype(np.float32)
 
-        outputs = self.session.run(None, {self.session.get_inputs()[0].name: image_data})
+        outputs = self.session.run(None, {self.input_name: image_data})
         return self._postprocess(outputs, pad, (w0, h0))
 
     def detect_centers(self, frame: np.ndarray) -> list[tuple[int, int]]:

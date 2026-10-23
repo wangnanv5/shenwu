@@ -143,7 +143,9 @@ class GameController:
         self.current_hwnd = None
         self.window_fail_counts = {}
         win32gui.EnumWindows(self.get_hwnd, None)
-        assert self.hwnd_list , "幻唐志窗口未找到"
+        if not self.hwnd_list:
+            # 不用 assert：python -O 会移除断言，后面 hwnd_list[0] 会变成 IndexError
+            raise RuntimeError("幻唐志窗口未找到")
         self.connected_hwnds = list(self.hwnd_list)
         print(f"初始化成功,找到{len(self.hwnd_list)}个游戏窗口")
         self.set_radio(self.hwnd_list[0])
@@ -151,13 +153,6 @@ class GameController:
         # print(self.hwnd_list)
         self.resource = GameResource()
         # self.hwnd_list = self.hwnd_list[0]
-        # YOLO 检测器：模型文件缺失时只警告不拦截启动（self.yolo = None），
-        # 业务方法统一用 self.detect_centers(frame) 取目标中心坐标
-        if os.path.exists(DEFAULT_ONNX_MODEL):
-            self.yolo = YoloDetector(DEFAULT_ONNX_MODEL)
-        else:
-            self.yolo = None
-            print(f"❌ 未找到 YOLO 模型 {DEFAULT_ONNX_MODEL}，YOLO 检测不可用")
 
     def set_radio(self,hwnd):
         restore_window(hwnd)
@@ -174,6 +169,15 @@ class GameController:
         # RapidOCR 构造时要加载 ONNX 模型，放在 __init__ 会拖慢所有命令
         from shenwu.ocr import Ocr
         return Ocr()
+
+    @functools.cached_property
+    def yolo(self):
+        # 同 ocr：只有挖宝任务需要 YOLO，放 __init__ 会让所有命令都等模型加载；
+        # 模型文件缺失时返回 None，业务方法按「不可用」处理
+        if not os.path.exists(DEFAULT_ONNX_MODEL):
+            print(f"❌ 未找到 YOLO 模型 {DEFAULT_ONNX_MODEL}，YOLO 检测不可用")
+            return None
+        return YoloDetector(DEFAULT_ONNX_MODEL)
 
     def detect_centers(self, frame):
         """YOLO 检测帧内目标，返回中心坐标 [(cx, cy), ...]（帧内像素坐标）。
@@ -650,16 +654,26 @@ class GameController:
         print(f"✅ 已右键点击司南图标 ({x}, {y})")
         return True
 
-    def _snap_si_nan(self, hwnd, target):
-        """重新检测司南，返回距 target 最近的目标（match）；无目标返回 None。
+    def _snap_si_nan(self, hwnd, target, used=None, tolerance=30):
+        """重新检测司南，返回距 target 最近且未被点击过的目标（match）；无目标返回 None。
 
         挖宝过程中界面可能滚动/移动导致旧坐标失效，每次右键前先吸附到当前位置。
+        used: 本次流程已点击过的中心坐标列表；与其距离在 tolerance 像素内的候选
+        会被排除，避免界面位移后把已处理的目标再次吸附回来（重复挖宝）。
         """
         matches = self._find_si_nans(hwnd)
         if not matches:
             return None
-        return min(matches, key=lambda m: (m["bbox"][0] + m["bbox"][2] / 2 - target[0]) ** 2
-                                         + (m["bbox"][1] + m["bbox"][3] / 2 - target[1]) ** 2)
+
+        candidates = [(get_abs_x_y_cv_windows(m["bbox"]), m) for m in matches]
+        if used:
+            candidates = [((cx, cy), m) for (cx, cy), m in candidates
+                          if all((cx - ux) ** 2 + (cy - uy) ** 2 > tolerance ** 2
+                                 for ux, uy in used)]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda item: (item[0][0] - target[0]) ** 2
+                                               + (item[0][1] - target[1]) ** 2)[1]
 
     def _wa_bao_yolo(self, hwnd_index=0, stop_event=None):
         """_wa_bao_yolo_hwnd 的按窗口序号封装"""
@@ -695,7 +709,6 @@ class GameController:
             print(f"🔍 第 {round_no} 轮检测到 {len(dets)} 个目标")
             for i, (x1, y1, x2, y2, conf, cid) in enumerate(dets):
                 bbox = (x1, y1, x2 - x1, y2 - y1)
-                print(f"  🎯 目标 {i + 1}: bbox={bbox} conf={conf:.2f}")
                 self.click_match({"bbox": bbox}, region, delay=0.2)
 
             # 4. 所有目标点完，等 3 秒再进行下一轮
@@ -822,7 +835,8 @@ class GameController:
 
     def run_fish(self,stop_event=None):
         win32gui.EnumWindows(self.get_hwnd, None)
-        assert self.hwnd_list , "幻唐志窗口未找到"
+        if not self.hwnd_list:
+            raise RuntimeError("幻唐志窗口未找到")
 
         hwnd = self.hwnd_list[0]
         restore_window(hwnd)
@@ -835,7 +849,8 @@ class GameController:
 
         # 「有鱼」图标只加载一次，用项目统一的 cv2 模板匹配替代 pyautogui.locate
         you_yu_templ = cv2.imread(str(you_yu_path), cv2.IMREAD_GRAYSCALE)
-        assert you_yu_templ is not None, f"钓鱼图标加载失败: {you_yu_path}"
+        if you_yu_templ is None:
+            raise RuntimeError(f"钓鱼图标加载失败: {you_yu_path}")
 
         while True:
             if is_stopped(stop_event):
@@ -862,7 +877,8 @@ class GameController:
 
     def run_auto_task(self,task_name):
         win32gui.EnumWindows(self.get_hwnd, None)
-        assert self.hwnd_list , "幻唐志窗口未找到"
+        if not self.hwnd_list:
+            raise RuntimeError("幻唐志窗口未找到")
 
         failed_hwnds = []
         for hwnd in self.hwnd_list:
@@ -1056,35 +1072,49 @@ class GameController:
                         human_delay(3)
 
                     self.wait_until(region, self.is_in_fight,action=click_task_and_wait, action_first=True)
-                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
-                                        action=lambda: self.close_talk(region))                    
+                    self.wait_until(region, self.is_has_talk, lead=1,want=False,action=lambda: self.close_talk(region))                    
                     self.reset_round(hwnd_index)
 
                     self.wait_until(region, self.is_in_fight, want=False, lead=0.1)
                     human_delay(0.2)
-
-                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
-                                        action=lambda: self.close_talk(region))
+                    self.wait_until(region, self.is_has_talk, lead=1,want=False,action=lambda: self.close_talk(region))
                 elif task_type == XiuYeTaskType.LIE_HEN:
                     print("开始修业裂痕任务")
 
                     def click_task_and_wait():
-                        human_delay(1)
+                        print("开始寻路")
                         windows_click(hwnd, xiu_ye_x, xiu_ye_y)
                         human_delay(3)
 
-                    # 第一次封印,封印结束出现对话框
-                    self.wait_until(region, self.is_in_fight,action=click_task_and_wait, action_first=True)
-                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
-                                    action=lambda: self.close_talk(region))
+                    self.wait_until(region, self.is_has_xun_lu,action=click_task_and_wait, action_first=True,want=False)
+                    # 寻路结束
+                    print("寻路结束")
+
+                    human_delay(3)
+                    frame = self.grab_frame(region)
+                    # 共三种情况
+                    # 第一种寻路结束后进入战斗 
+                    if self.is_in_fight(frame):
+                        print("✅ 检测到战斗")
+                        self.wait_until(region, self.is_has_talk, lead=1.5,want=False,action=lambda: self.close_talk(region))                    
+                        self.reset_round(hwnd_index)
+                        self.wait_until(region, self.is_in_fight, want=False, lead=0.1)
+                        human_delay(0.5)
+                        self.wait_until(region, self.is_has_talk, lead=1,want=False,action=lambda: self.close_talk(region))
+                        continue    
+
+                    # 第二种寻路结束后直接完成任务
+                    # 第三种还需要进行二次战斗
+                    # self.wait_until(region, self.is_has_talk, lead=1,want=False,
+                    #                 action=lambda: self.close_talk(region))
                     
-                    self.reset_round(hwnd_index)
+                    # self.reset_round(hwnd_index)
 
-                    self.wait_until(region, self.is_in_fight, want=False, lead=2)
-                    human_delay(0.2)
+                    # self.wait_until(region, self.is_in_fight, want=False, lead=2)
+                    # human_delay(0.2)
 
-                    self.wait_until(region, self.is_has_talk, lead=1,want=False,
-                                        action=lambda: self.close_talk(region))
+                    # self.wait_until(region, self.is_has_talk, lead=1,want=False,
+                    #                     action=lambda: self.close_talk(region))
                 else:
                     print("❌ 未知任务类型")
             except Exception:
@@ -1350,17 +1380,19 @@ class GameController:
         targets = [get_abs_x_y_cv_windows(m["bbox"]) for m in matches]
         print(f"✅ 共记录 {len(targets)} 个司南目标")
 
+        used = []  # 已点击过的司南中心坐标，吸附时排除，避免重复处理
         for i, target in enumerate(targets):
             if is_stopped(stop_event):
                 break
 
-            match = self._snap_si_nan(hwnd, target)
+            match = self._snap_si_nan(hwnd, target, used)
             if match is None:
-                print(f"⚠️ 第 {i + 1}/{len(targets)} 个司南重检测失败，跳过")
+                print(f"⚠️ 第 {i + 1}/{len(targets)} 个司南重检测失败或已处理，跳过")
                 continue
 
             print(f"🧭 处理第 {i + 1}/{len(targets)} 个司南")
             self._open_si_nan_hwnd(hwnd, match)
+            used.append(get_abs_x_y_cv_windows(match["bbox"]))
             human_delay(1)
 
             # 挖到 YOLO 无目标（返回 None）后继续下一个司南

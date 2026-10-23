@@ -8,29 +8,39 @@
           "count": "50"
         }
       }
+    ],
+    "师门": [
+      {
+        "key": "xiu_ye",
+        "params": {}
+      }
+    ],
+    "日常": [
+      {
+        "key": "xiu_ye",
+        "params": {}
+      },
+      {
+        "key": "xiu_lian",
+        "params": {}
+      }
+    ],
+    "宝图": [
+      {
+        "key": "bao_tu",
+        "params": {}
+      }
     ]
   },
   "bindings": {
-    "三生万物": "test"
+    "三生万物": "日常"
   },
-  "active_queue": "test",
-  "show_dev_tools": false,
+  "active_queue": "师门",
   "params": {
     "bao_ta": {
       "count": "50"
-    },
-    "auto_task": {
-      "task_name": "法宝引导"
-    },
-    "test_resources": {
-      "icon_name": "bag_icon",
-      "threshold": 0.7
-    },
-    "test_get_color": {
-      "color": "blue"
     }
   },
-  "ocr_history": [],
   "selected_servers": [],
   "auto_scroll": true,
   "auto_refresh": true,
@@ -42,11 +52,6 @@
   "schedule": {
     "enabled": false,
     "time": "12:00"
-  },
-  "diagnostic": {
-    "threshold": 70,
-    "icon_name": "bag_icon",
-    "color": "blue"
   },
   "selected_server": "三生万物"
 }

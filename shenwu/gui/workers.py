@@ -6,9 +6,11 @@ dispatch_task 按 key 调 controller 对应方法，hwnd 用于把 run_xxx 定�
 （按 hwnd 定向），多线程并行互不干扰。
 
 停止语义：
-- RowWorker.stop_event 置位 → 任务在循环边界优雅退出（数秒内）；
+- 单行「停止」：request_stop 同时置行级 stop_event（循环边界退出）与
+  行级 terminate_event（bind_thread_terminate 绑定到本线程）→ 当前任务里的
+  human_delay 在 ≤0.1s 内抛 TaskTerminated，立即打断且不影响其他窗口；
 - 全局终止（Ctrl+Alt+Q / 托盘立即停止）置 terminate_event →
-  human_delay 立即抛 TaskTerminated，从任意调用深度打断。
+  human_delay 立即抛 TaskTerminated，打断所有行。
 命令行路径不受影响（不构造 RowWorker）。
 """
 
@@ -57,30 +59,9 @@ def dispatch_task(controller, key: str, params: dict,
         controller.bao_ta(hwnd_index=_resolve_index(controller, hwnd),
                           count=max(1, count), stop_event=stop_event)
 
-    elif key == "auto_task":
-        task_name = str(params.get("task_name", "")).strip()
-        if not task_name:
-            raise ValueError("任务名不能为空")
-        controller.run_auto_task(task_name)
-
-    elif key == "test_resources":
-        controller.test_resources(
-            stop_event=stop_event,
-            threshold=params.get("threshold"),
-            icon_names=params.get("icon_names"),
-        )
-
-    elif key == "test_get_color":
-        controller.test_get_color(
-            color=params.get("color", "blue"),
-            stop_event=stop_event,
-        )
-
-    elif key == "test_si_nan":
-        controller.test_si_nan(
-            stop_event=stop_event,
-            threshold=params.get("threshold"),
-        )
+    elif key == "bao_tu":
+        controller.bao_tu(hwnd_index=_resolve_index(controller, hwnd),
+                          stop_event=stop_event)
 
     else:
         raise ValueError(f"未知任务: {key}")
@@ -90,8 +71,8 @@ class RowWorker(threading.Thread):
     """单窗口队列线程：按顺序跑完绑定队列的任务，可按轮次重复。
 
     一次只服务一个 hwnd；多个 RowWorker 相互独立、可并行
-    （输入全部为消息级，按 hwnd 定向）。stop_event 置位后在任务循环
-    边界优雅退出。
+    （输入全部为消息级，按 hwnd 定向）。request_stop 通过行级
+    terminate_event 立即打断当前任务（见模块 docstring 的停止语义）。
     """
 
     def __init__(self, controller, hwnd, queue_name, tasks,
@@ -105,14 +86,26 @@ class RowWorker(threading.Thread):
         self.rounds = max(0, int(rounds))          # 0 = 无限循环
         self.round_interval = max(0.0, float(round_interval))
         self._on_finished = on_finished            # 结束回调（线程内调用）
-        self.stop_event = threading.Event()
+        self.stop_event = threading.Event()        # 循环边界退出
+        self.terminate_event = threading.Event()   # 行级立即打断（本线程专属）
 
     def request_stop(self):
-        """优雅停止：在任务循环边界退出，不打断当前操作"""
+        """立即停止：打断当前任务（行级 human_delay 立即抛 TaskTerminated），
+        同时置 stop_event 保证循环边界判断也立即为真"""
         self.stop_event.set()
+        self.terminate_event.set()
 
     def run(self):
-        from shenwu.utils import TaskTerminated
+        from shenwu.utils import TaskTerminated, bind_thread_terminate, clear_terminate
+
+        # 上一次「全部停止 / 紧急停止」置位的全局信号必须在这里复位：否则本轮任务
+        # 第一个 human_delay 就会抛 TaskTerminated，表现为「刚运行就自己停了」。
+        # 全局信号只对当时正在运行的线程有意义（它们已经在 human_delay 里被唤醒）。
+        clear_terminate()
+
+        # 把行级终止事件绑定到本线程：human_delay 检查到它就抛 TaskTerminated，
+        # 与其他窗口的 RowWorker 互不影响
+        bind_thread_terminate(self.terminate_event)
 
         try:
             round_index = 0

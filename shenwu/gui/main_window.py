@@ -5,14 +5,14 @@
 - 运行即把该 hwnd 绑定到所选队列（按服务器名持久化），供定时执行与边框显示复用；
 - 「定时」到点后按各窗口已绑定的队列依次执行（鼠标键盘独占，只能串行）。
 
-任务卡片只负责「编辑参数 + 加入队列」，没有单独的启停按钮；
-开发/测试类功能（诊断等）默认隐藏，通过标题栏的「开发/测试」开关显示。
+任务卡片只负责「编辑参数 + 加入队列」，没有单独的启停按钮。
 """
 
 from __future__ import annotations
 
 import ctypes
 import sys
+import threading
 import time
 from dataclasses import dataclass
 
@@ -39,7 +39,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QSlider,
     QSpinBox,
     QSplitter,
     QSystemTrayIcon,
@@ -56,13 +55,13 @@ import win32gui
 
 from shenwu.gui import settings
 from shenwu.gui.theme import QSS
-from shenwu.gui.workers import RowWorker, dispatch_task
+from shenwu.gui.workers import RowWorker
 
 # 「定位」标识：边框颜色与自动消失时长
 IDENTIFY_COLOR = (255, 200, 0)
 IDENTIFY_SECONDS = 5
 
-GRID_COLUMNS = 4
+GRID_COLUMNS = 2  # 任务卡片固定两列
 
 # 紧急停止热键：Ctrl + Alt + Q（脚本运行时游戏窗口会盖住界面，用它兜底）
 EMERGENCY_MODIFIERS = (0x11, 0x12)  # VK_CONTROL / VK_MENU(Alt)
@@ -75,8 +74,7 @@ DEFAULT_QUEUE_NAME = "默认队列"
 class Param:
     """卡片上的参数控件
 
-    kind: text / check / combo / history(可编辑下拉+历史) / icon_combo(图标下拉,运行时填充)
-          / slider(0~100 的滑杆，取值时换算成 0~1 的匹配阈值)
+    kind: text / check
     """
 
     name: str
@@ -97,7 +95,6 @@ class TaskSpec:
     run_text: str = "加入队列"
     params: tuple[Param, ...] = ()
     tip: str = ""
-    dev_only: bool = False  # 开发/测试类功能，默认不在主界面显示
 
 
 TASKS: tuple[TaskSpec, ...] = (
@@ -116,34 +113,10 @@ TASKS: tuple[TaskSpec, ...] = (
                       placeholder="如：10"),),
     ),
     TaskSpec(
-        "auto_task", "OCR 自动任务", "OCR 识别屏幕上的任务名并点击",
-        params=(Param("task_name", "任务名", "history", default="法宝引导",
-                      placeholder="如：法宝引导"),),
-    ),
-    # ---------- 开发/测试（默认隐藏，标题栏开关显示） ----------
-    TaskSpec(
-        "test_resources", "图标检测诊断", "实时预览指定图标的匹配结果（可调阈值）",
-        tip="打开 OpenCV 预览窗口，按 q 退出",
-        params=(Param("icon_name", "图标", "icon_combo"),
-                Param("threshold", "阈值", "slider", default="0.70")),
-        dev_only=True,
-    ),
-    TaskSpec(
-        "test_get_color", "颜色检测诊断", "实时可视化 get_color 的搜索区域与结果",
-        tip="打开 OpenCV 预览窗口，按 q 退出",
-        params=(Param("color", "颜色", "combo", default="blue",
-                      options=("blue", "yellow", "red")),),
-        dev_only=True,
-    ),
-    TaskSpec(
-        "test_si_nan", "司南检测诊断", "实时预览司南图标的 find_all 匹配结果（可调阈值）",
-        tip="打开 OpenCV 预览窗口，按 q 退出；红十字是右键实际点击的目标",
-        params=(Param("threshold", "阈值", "slider", default="0.70"),),
-        dev_only=True,
+        "bao_tu", "挖宝图（司南）", "开背包 → 识别所有司南 → 逐个右键 → YOLO 自动挖宝",
+        tip="全部司南挖完后自动结束；挖宝中途可用行内「停止」立即中断",
     ),
 )
-
-DEV_TASK_KEYS = tuple(spec.key for spec in TASKS if spec.dev_only)
 
 
 def _repolish(widget: QWidget):
@@ -191,32 +164,6 @@ class TaskCard(QFrame):
             if param.kind == "check":
                 widget: QWidget = QCheckBox()
                 widget.setChecked(bool(param.default))
-            elif param.kind in ("combo", "icon_combo"):
-                widget = QComboBox()
-                if param.options:
-                    widget.addItems(param.options)
-                    widget.setCurrentText(param.default)
-                if param.kind == "icon_combo":
-                    widget.setToolTip("连接游戏窗口后自动填充 resource 里的图标")
-            elif param.kind == "history":
-                widget = QComboBox()
-                widget.setEditable(True)
-                widget.setInsertPolicy(QComboBox.InsertPolicy.InsertAtTop)
-                if param.options:
-                    widget.addItems(param.options)
-                widget.setCurrentText(param.default)
-                widget.lineEdit().setPlaceholderText(param.placeholder)
-            elif param.kind == "slider":
-                widget = QSlider(Qt.Orientation.Horizontal)
-                widget.setRange(0, 100)
-                widget.setSingleStep(5)
-                widget.setValue(int(float(param.default) * 100))
-
-                def show_value(value, _label=label, _base=param.label):
-                    _label.setText(f"{_base}  {value / 100:.2f}")
-
-                widget.valueChanged.connect(show_value)
-                show_value(widget.value())
             else:
                 widget = QLineEdit()
                 widget.setText(param.default)
@@ -253,10 +200,6 @@ class TaskCard(QFrame):
         for name, widget in self.widgets.items():
             if isinstance(widget, QCheckBox):
                 values[name] = widget.isChecked()
-            elif isinstance(widget, QComboBox):
-                values[name] = widget.currentText()
-            elif isinstance(widget, QSlider):
-                values[name] = widget.value() / 100.0
             else:
                 values[name] = widget.text()
         return values
@@ -270,27 +213,10 @@ class TaskCard(QFrame):
             try:
                 if isinstance(widget, QCheckBox):
                     widget.setChecked(bool(value))
-                elif isinstance(widget, QComboBox):
-                    widget.setCurrentText(str(value))
-                elif isinstance(widget, QSlider):
-                    widget.setValue(int(float(value) * 100))
                 else:
                     widget.setText(str(value))
             except Exception:
                 pass
-
-    def set_param_options(self, name: str, options):
-        """运行时填充下拉框选项（图标列表要等 controller 就绪才有）"""
-        widget = self.widgets.get(name)
-        if not isinstance(widget, QComboBox):
-            return
-        current = widget.currentText()
-        widget.blockSignals(True)
-        widget.clear()
-        widget.addItems(list(options))
-        if current in options:
-            widget.setCurrentText(current)
-        widget.blockSignals(False)
 
     # ---------- 状态 ----------
 
@@ -329,6 +255,7 @@ class _LogTee:
         self._emit = emit
         self._original = original
         self._buffer = ""
+        self._lock = threading.Lock()  # 多个 RowWorker 同时 print 时保护行缓冲
         self.encoding = "utf-8"
         self.errors = "replace"
 
@@ -341,11 +268,16 @@ class _LogTee:
         if not text:
             return len(text or "")
 
-        self._buffer += text
-        while "\n" in self._buffer:
-            line, self._buffer = self._buffer.split("\n", 1)
-            if line.strip():
-                self._emit(f"[{time.strftime('%H:%M:%S')}] {line}\n")
+        # 攒行过程持锁，emit 放到锁外，避免持锁期间触发 Qt 排队投递
+        lines = []
+        with self._lock:
+            self._buffer += text
+            while "\n" in self._buffer:
+                line, self._buffer = self._buffer.split("\n", 1)
+                if line.strip():
+                    lines.append(f"[{time.strftime('%H:%M:%S')}] {line}\n")
+        for line in lines:
+            self._emit(line)
         return len(text)
 
     def flush(self):
@@ -432,23 +364,6 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(150, self._refresh_windows)
         QTimer.singleShot(300, self._refresh_window_table)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._reflow_cards()
-
-    def _reflow_cards(self):
-        """响应式：按右侧任务区实际宽度自适应卡片列数（每列约 280px，1~4 列）"""
-        if not hasattr(self, "_cards_grid"):
-            return
-        base = (self._task_scroll.viewport().width()
-                if getattr(self, "_task_scroll", None) is not None else self.width())
-        cols = max(1, min(GRID_COLUMNS, (base - 24) // 280))
-        if cols == self._grid_cols:
-            return
-        self._grid_cols = cols
-        for index, key in enumerate(self._card_order):
-            self._cards_grid.addWidget(self.cards[key], index // cols, index % cols)
-
     # ---------- 配置持久化 ----------
 
     def _restore_settings(self):
@@ -470,11 +385,8 @@ class MainWindow(QMainWindow):
                 if card is not None:
                     card.set_params(values)
 
-            self.cards["auto_task"].set_param_options("task_name", conf.get("ocr_history", []))
             self.chk_auto_scroll.setChecked(bool(conf.get("auto_scroll", True)))
             self.chk_auto_refresh.setChecked(bool(conf.get("auto_refresh", True)))
-            self.btn_dev_tools.setChecked(bool(conf.get("show_dev_tools", False)))
-            self._apply_dev_tools_visibility()
 
             loop = conf.get("loop") or {}
             self.spin_times.setValue(int(loop.get("times", 1)))
@@ -484,10 +396,6 @@ class MainWindow(QMainWindow):
             plan = conf.get("schedule") or {}
             self.chk_schedule.setChecked(bool(plan.get("enabled", False)))
             self.time_schedule.setTime(_parse_time(str(plan.get("time", "12:00"))))
-
-            diag = conf.get("diagnostic") or {}
-            self.cards["test_resources"].set_params({"threshold": float(diag.get("threshold", 70)) / 100})
-            self.cards["test_get_color"].set_params({"color": diag.get("color", "blue")})
         finally:
             self._restoring = False
             self._apply_schedule_setting()
@@ -499,7 +407,6 @@ class MainWindow(QMainWindow):
         conf = self.settings
         conf["queues"] = self.queues
         conf["active_queue"] = self.active_queue
-        conf["show_dev_tools"] = self.btn_dev_tools.isChecked()
         conf["params"] = {key: card.get_params() for key, card in self.cards.items()
                           if card.get_params()}
         conf["auto_scroll"] = self.chk_auto_scroll.isChecked()
@@ -512,11 +419,6 @@ class MainWindow(QMainWindow):
         conf["schedule"] = {
             "enabled": self.chk_schedule.isChecked(),
             "time": self.time_schedule.time().toString("HH:mm"),
-        }
-        conf["diagnostic"] = {
-            "threshold": int(self.cards["test_resources"].get_params().get("threshold", 0.7) * 100),
-            "icon_name": self.cards["test_resources"].get_params().get("icon_name", ""),
-            "color": self.cards["test_get_color"].get_params().get("color", "blue"),
         }
         settings.save(conf)
 
@@ -535,18 +437,6 @@ class MainWindow(QMainWindow):
             pass
         self.settings["bindings"] = by_server
         self._save_settings()
-
-    def _update_ocr_history(self, task_name: str):
-        """OCR 任务名去重后入历史（最多 10 条）"""
-        task_name = (task_name or "").strip()
-        if not task_name:
-            return
-        history = self.settings.get("ocr_history") or []
-        if task_name in history:
-            history.remove(task_name)
-        history.insert(0, task_name)
-        self.settings["ocr_history"] = history[:10]
-        self.cards["auto_task"].set_param_options("task_name", self.settings["ocr_history"])
 
     # ---------- 构建界面 ----------
 
@@ -568,33 +458,16 @@ class MainWindow(QMainWindow):
         self.btn_refresh = QPushButton("连接 / 刷新窗口")
         self.btn_refresh.clicked.connect(self._refresh_windows)
 
-        self.btn_dev_tools = QPushButton("开发/测试")
-        self.btn_dev_tools.setCheckable(True)
-        self.btn_dev_tools.setToolTip("显示 / 隐藏图标检测、颜色检测等开发调试功能")
-        self.btn_dev_tools.toggled.connect(self._on_dev_tools_toggled)
-
         layout = QHBoxLayout()
         layout.setSpacing(12)
         layout.addLayout(texts)
         layout.addStretch(1)
-        layout.addWidget(self.btn_dev_tools)
         layout.addWidget(self.pill)
         layout.addWidget(self.btn_refresh)
 
         header = QWidget()
         header.setLayout(layout)
         self._header = header
-
-    def _on_dev_tools_toggled(self, _checked: bool):
-        self._apply_dev_tools_visibility()
-        self._save_settings()
-
-    def _apply_dev_tools_visibility(self):
-        show = self.btn_dev_tools.isChecked()
-        for key in DEV_TASK_KEYS:
-            card = self.cards.get(key)
-            if card is not None:
-                card.setVisible(show)
 
     def _build_body(self):
         root = QWidget()
@@ -902,12 +775,10 @@ class MainWindow(QMainWindow):
         grid.setSpacing(12)
 
         self._cards_grid = grid
-        self._card_order = [spec.key for spec in TASKS]
-        self._grid_cols = GRID_COLUMNS
-        for index, key in enumerate(self._card_order):
-            card = TaskCard(next(s for s in TASKS if s.key == key))
+        for index, spec in enumerate(TASKS):
+            card = TaskCard(spec)
             card.add_to_queue.connect(self._on_card_add)
-            self.cards[key] = card
+            self.cards[spec.key] = card
             grid.addWidget(card, index // GRID_COLUMNS, index % GRID_COLUMNS)
 
         outer.addLayout(grid)
@@ -1197,10 +1068,6 @@ class MainWindow(QMainWindow):
         self._row_workers[hwnd] = {"worker": worker, "queue": queue_name}
         self._set_row_buttons(hwnd)
         self._update_queue_progress()
-        # OCR 任务名进历史（此处是 GUI 线程，更新下拉框安全）
-        for key, params in tasks:
-            if key == "auto_task" and (params or {}).get("task_name"):
-                self._update_ocr_history(params["task_name"])
         # 运行期间暂停自动刷新，避免重建行干扰运行状态显示
         self._auto_refresh_timer.stop()
         worker.start()
@@ -1208,12 +1075,12 @@ class MainWindow(QMainWindow):
             f"▶ [{_now()}] hwnd={hwnd} 开始执行队列「{queue_name}」×{len(tasks)}\n")
 
     def _stop_row(self, hwnd: int):
-        """优雅停止单行：在任务循环边界退出（数秒内），不打断当前操作"""
+        """立即停止单行：打断当前任务（行级 human_delay 立即抛 TaskTerminated）"""
         entry = self._row_workers.get(hwnd)
         if entry is None:
             return
         entry["worker"].request_stop()
-        self._append_log(f"⏹ [{_now()}] 已请求停止 hwnd={hwnd}\n")
+        self._append_log(f"⏹ [{_now()}] hwnd={hwnd} 正在停止（打断当前操作）…\n")
 
     def _stop_all_rows(self, immediate: bool = False):
         """停止全部运行中的行；immediate=True 时同时置全局终止信号立即打断"""
@@ -1229,14 +1096,23 @@ class MainWindow(QMainWindow):
             f"⏹ [{_now()}] 已请求停止全部运行中的窗口（{len(self._row_workers)} 个）\n")
 
     def _on_row_finished(self, hwnd: int):
-        """行线程结束（跨线程信号）：恢复按钮状态与自动刷新"""
+        """行线程结束（跨线程信号）：恢复按钮状态与自动刷新
+
+        只有线程真正退出（任务实际已终止）才会走到这里，界面状态以此为准。
+        """
         entry = self._row_workers.pop(hwnd, None)
         queue_name = entry["queue"] if entry else ""
+        stopped = entry is not None and entry["worker"].stop_event.is_set()
         self._set_row_buttons(hwnd)
         self._update_queue_progress()
-        self._append_log(f"✅ [{_now()}] hwnd={hwnd} 队列「{queue_name}」执行结束\n")
-        if not self._row_workers and self.chk_auto_refresh.isChecked():
-            self._auto_refresh_timer.start()
+        if stopped:
+            self._append_log(f"⏹ [{_now()}] hwnd={hwnd} 队列「{queue_name}」已停止\n")
+        else:
+            self._append_log(f"✅ [{_now()}] hwnd={hwnd} 队列「{queue_name}」执行结束\n")
+        if not self._row_workers:
+            self.statusBar().clearMessage()  # 「正在停止…」在此刻真相大白
+            if self.chk_auto_refresh.isChecked():
+                self._auto_refresh_timer.start()
 
     def _set_row_buttons(self, hwnd: int):
         """行按钮状态与运行状态保持一致：运行中 → 运行禁用/停止可用"""
@@ -1406,14 +1282,6 @@ class MainWindow(QMainWindow):
             self._append_log("❌ 未枚举到《幻唐志》游戏窗口\n")
             return
 
-        # 图标列表要等 controller 就绪才有，这里补进诊断卡片的下拉框
-        card = self.cards.get("test_resources")
-        if card is not None:
-            card.set_param_options("icon_name", controller.icon_names())
-            saved_icon = (self.settings.get("diagnostic") or {}).get("icon_name")
-            if saved_icon:
-                card.set_params({"icon_name": saved_icon})
-
         infos = controller.window_infos()
         self._set_pill("ok", f"已连接 {count} 个窗口 · 缩放 {controller.radio:.2f}")
         self._append_log(f"✅ 已连接 {count} 个游戏窗口，缩放比例 {controller.radio:.2f}\n")
@@ -1436,7 +1304,7 @@ class MainWindow(QMainWindow):
             return
         self._stop_all_rows(immediate=True)
         self.statusBar().showMessage("正在停止…")
-        self._append_log(f"⏹ [{_now()}] 已请求停止，等待当前操作结束（剩余任务不再执行）…\n")
+        self._append_log(f"⏹ [{_now()}] 正在立即停止（打断当前操作，剩余任务不再执行）…\n")
 
     def _scheduled_start(self):
         """定时触发：为所有已绑定且队列非空的窗口各起一条线程并行执行"""

@@ -253,30 +253,6 @@ QCheckBox:disabled {
     color: #5c6478;
 }
 
-/* 滑杆（诊断阈值等） */
-QSlider::groove:horizontal {
-    height: 4px;
-    background: #232c40;
-    border-radius: 2px;
-}
-QSlider::sub-page:horizontal {
-    background: #5b8cff;
-    border-radius: 2px;
-}
-QSlider::handle:horizontal {
-    width: 14px;
-    height: 14px;
-    margin: -5px 0;
-    border-radius: 7px;
-    background: #eef2fb;
-}
-QSlider::handle:horizontal:hover {
-    background: #ffffff;
-}
-QSlider::handle:horizontal:disabled {
-    background: #3a4152;
-}
-
 /* ---------- 队列列表 ---------- */
 QListWidget#queueList {
     background: #0f1522;

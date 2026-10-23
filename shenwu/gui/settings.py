@@ -1,7 +1,7 @@
 """GUI 配置的读写（纯 json，不引入新依赖）。
 
 存盘内容：队列顺序、各任务参数、运行轮次/间隔、定时任务、日志开关、
-上次选中的服务器名、OCR 任务名历史、诊断面板阈值等。
+上次选中的服务器名等。
 """
 
 from __future__ import annotations
@@ -19,15 +19,12 @@ DEFAULTS = {
     # 因为 hwnd 每次启动都会变；运行时再解析成 hwnd
     "bindings": {},
     "active_queue": "",           # 当前正在编辑/绑定的队列名
-    "show_dev_tools": False,      # 是否显示「开发/测试」类功能卡片
     "params": {},                 # {任务key: {参数名: 值}}，卡片当前参数
-    "ocr_history": [],            # OCR 任务名历史
     "selected_servers": [],       # 上次在窗口列表多选的服务器名（恢复勾选用）
     "auto_scroll": True,
     "auto_refresh": True,         # 空闲时自动刷新窗口列表
     "loop": {"times": 1, "interval": 30, "continue_on_error": False},
     "schedule": {"enabled": False, "time": "12:00"},
-    "diagnostic": {"threshold": 70, "icon_name": "", "color": "blue"},
 }
 
 
@@ -47,6 +44,10 @@ def load() -> dict:
         data["queues"] = {"默认队列": [{"key": key, "params": {}}
                                       for key in data["queue"]]}
         data["active_queue"] = "默认队列"
+
+    # 清理已废弃的键（旧版本遗留：开发测试开关、OCR 历史、诊断面板）
+    for legacy in ("show_dev_tools", "ocr_history", "diagnostic"):
+        data.pop(legacy, None)
     data.pop("queue", None)
 
     # 嵌套字典逐层兜底，避免旧版本配置缺少新字段

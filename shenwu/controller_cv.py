@@ -933,7 +933,7 @@ class GameController(BaoTaTasks, BaoTuTasks):
                         windows_click(hwnd, xiu_ye_x, xiu_ye_y)
                         human_delay(3)
 
-                    self.wait_until(region, self.is_has_xun_lu,action=click_task_and_wait, action_first=True)
+                    self.wait_until(region, self.is_has_xun_lu,action=click_task_and_wait, want=False,action_first=True)
                     # 寻路结束
                     human_delay(3)
                     frame = self.grab_frame(region)
@@ -1248,76 +1248,3 @@ class GameController(BaoTaTasks, BaoTuTasks):
 
         print("🏁 所有司南均已处理，挖宝流程结束")
         return True
-
-    # 玲珑宝塔
-    # 测试
-    # 诊断用：检测 resource 中所有图标是否出现在当前游戏窗口
-    def icon_names(self):
-        """全部图标属性名（诊断面板下拉框用）"""
-        return sorted(name for name in vars(self.resource) if name.endswith("_icon"))
-
-    def test_resources(self, hwnd_index=0, stop_event=None, threshold=None, icon_names=None):
-        """测试 resource 中的图标能否在当前游戏窗口检测到。
-
-        实时截图，命中的图标用绿框 + 匹配分数标注在预览窗口，
-        控制台在结果变化时打印「检测到 / 未检测到」清单，按 q 退出。
-
-        icon_names: 只看这几个图标（GameResource 的属性名），不给则用默认图标
-        threshold : 临时匹配阈值，不给则用模块级 THRESHOLD
-        """
-        hwnd = self.hwnd_list[hwnd_index]
-        human_delay(1)
-
-        # self.close_talk(region, lead=1)
-        if icon_names:
-            icons = {name: getattr(self.resource, name)
-                     for name in icon_names if hasattr(self.resource, name)}
-        else:
-            # 取出 resource 里全部图标(属性名以 _icon 结尾)
-            # icons = {name: icon for name, icon in vars(self.resource).items()
-            #          if name.endswith("_icon")}
-            icons = {'test': self.resource.has_talk_icon }
-
-        if not icons:
-            print("❌ resource 中没有可测试的图标")
-            return
-
-        last_found = None
-        while True:
-            if is_stopped(stop_event):
-                break
-            gray = self.grab_frame(hwnd, "gray")
-            bgr = self.grab_frame(hwnd, "bgr")
-            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-
-            display = bgr.copy()
-            found, missing = [], []
-            for name, icon in icons.items():
-                if icon.ndim == 2:
-                    # 灰度图标配灰度帧
-                    match = self.find(gray, icon, threshold)
-                else:
-                    # 彩色图标存储时可能是 BGR 或 RGB，两种顺序都试，取分高的
-                    candidates = [m for m in (self.find(bgr, icon, threshold),
-                                              self.find(rgb, icon, threshold)) if m]
-                    match = max(candidates, key=lambda m: m["score"]) if candidates else None
-
-                if match is None:
-                    missing.append(name)
-                    continue
-
-                x, y, w, h = match["bbox"]
-                cv2.rectangle(display, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                cv2.putText(display, f"{name} {match['score']:.2f}",
-                            (x, max(y - 6, 14)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-                found.append(name)
-
-            if found != last_found:
-                last_found = found
-                print(f"\n✅ 检测到 {len(found)}/{len(icons)}: {', '.join(found) or '无'}")
-
-            cv2.imshow("resource 图标检测 - 按 q 退出", display)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
-
-        cv2.destroyAllWindows()

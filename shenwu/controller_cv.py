@@ -1,6 +1,7 @@
 import functools
 import os
 import threading
+import time
 from enum import Enum, auto
 
 import traceback
@@ -27,7 +28,7 @@ from shenwu.timing import TaskTerminated, human_delay, is_stopped, terminate_eve
 from shenwu.utils import get_abs_x_y_cv_windows
 from shenwu.vision import find_all_match, find_best_match, generate_grid_mask, get_color
 from shenwu.win_input import (
-    hotkey, press_key, windows_click, windows_key, windows_move_to, windows_right_click,
+     press_key, windows_click, windows_key, windows_move_to, windows_right_click,
 )
 from shenwu.yolo_detector import DEFAULT_ONNX_MODEL, YoloDetector
 
@@ -47,6 +48,19 @@ fish_height_end = 180
 open_bag_retries = 3       # 定位+点击的最大尝试次数
 open_bag_check_rounds = 3  # 每次点击后确认 is_open_bag 的轮数
 open_bag_check_gap = 0.3   # 确认轮询间隔（秒）
+close_bag_timeout = 10     # 关背包的确认超时（秒）
+
+# 回合重置节流：每 N 场战斗触发一次（第 1、N+1、2N+1… 场）
+# 一次 _reset_round_hwnd 可覆盖约 20 个回合，按 5 场一次的频率足够，
+# 中间场次跳过以降低调用频率，同时留 4 场的容错余量
+reset_round_fight_interval = 5
+
+# 门派论剑流程参数
+men_pai_lun_jian_click_retries = 3          # 匹配图标并点击的最大尝试次数
+men_pai_lun_jian_click_gap = 0.5            # 未匹配到图标时的重试间隔（秒）
+men_pai_lun_jian_xun_lu_start_timeout = 15  # 等自动寻路图标出现（秒）
+men_pai_lun_jian_xun_lu_timeout = 180       # 等自动寻路结束（秒）
+men_pai_lun_jian_fight_timeout = 300        # 等进入战斗 / 战斗结束（秒）
 
 # 宝塔/挖宝的识别参数与单窗口流程在 shenwu/tasks/ 下（顶部已导入并重导出）
 
@@ -67,6 +81,10 @@ class XiuLianTaskType(Enum):
     XUN_WU = auto()       # 寻物
     ZHAO_REN = auto()     # 找人
     FENG_DAO_REN = auto() # 疯道人(封到人)
+
+class _WaitTimeout(Exception):
+    """内部信号：带超时的 wait_until 到点仍未命中（只在本模块内消化，不外抛）"""
+
 
 @functools.lru_cache(maxsize=1)
 def get_controller():
@@ -93,6 +111,10 @@ class GameController(BaoTaTasks, BaoTuTasks):
         # 当前正在处理的窗口（GUI 用它高亮边框）；每个窗口的连续失败次数
         self.current_hwnd = None
         self.window_fail_counts = {}
+        # 每个窗口累计进入战斗的次数（reset_round_on_fight 用它节流重置回合）；
+        # reset_retry_hwnds 记录重置失败、需要下一场补做的窗口
+        self.fight_counts = {}
+        self.reset_retry_hwnds = set()
         win32gui.EnumWindows(self.get_hwnd, None)
         if not self.hwnd_list:
             # 不用 assert：python -O 会移除断言，后面 hwnd_list[0] 会变成 IndexError
@@ -178,6 +200,9 @@ class GameController(BaoTaTasks, BaoTuTasks):
         self.hwnd_status = status_map
         if dropped:
             print(f"已移除 {len(dropped)} 个失效的游戏窗口")
+            for hwnd in dropped:  # 顺手清掉失效窗口的战斗计数，避免字典长期堆积
+                self.fight_counts.pop(hwnd, None)
+                self.reset_retry_hwnds.discard(hwnd)
         self._sync_hwnd_list()
         return len(self.connected_hwnds)
 
@@ -266,12 +291,17 @@ class GameController(BaoTaTasks, BaoTuTasks):
         for status in statuses:
             for key in keys:
                 status[key] = False
-        # 重新开始时清空失败计数，否则上一轮的失败会累积到跳过阈值
+        # 重新开始时清空失败计数与战斗场次计数：失败会累积到跳过阈值，
+        # 战斗计数不清则新一轮的「首次进入战斗」不再触发重置
         if hwnd is None:
             self.window_fail_counts.clear()
+            self.fight_counts.clear()
+            self.reset_retry_hwnds.clear()
             self.current_hwnd = None
         else:
             self.window_fail_counts.pop(hwnd, None)
+            self.fight_counts.pop(hwnd, None)
+            self.reset_retry_hwnds.discard(hwnd)
 
     # ---------- 底层：截图 / 匹配 / 轮询 ----------
 
@@ -382,6 +412,10 @@ class GameController(BaoTaTasks, BaoTuTasks):
     def is_in_fight(self,frame):
         return self.find(frame, self.resource.is_in_fight_icon) is not None
 
+    def is_in_qu_mo(self,frame):
+        """驱魔状态：屏幕上有驱魔小图标（qu_mo_small）"""
+        return self.find(frame, self.resource.qu_mo_small_icon) is not None
+
     def is_open_pet_shop(self,frame):
         return self.find(frame, self.resource.pet_shop_icon) is not None
 
@@ -472,35 +506,46 @@ class GameController(BaoTaTasks, BaoTuTasks):
     
     # 检测是否在驱魔状态,如果没有,使用驱魔香
     def check_qu_mo(self, hwnd_index=0):
+        """检查驱魔状态；不在状态就开背包右键驱魔香，收尾统一关闭背包。
+
+        四步各司其职，任一步失败返回 False，但收尾一定执行：
+        1. is_in_qu_mo 判断是否已处于驱魔状态（在状态直接返回 True）；
+        2. _ensure_bag_open_hwnd 打开背包并用 is_open_bag 确认；
+        3. _click_icon_hwnd(right=True) 定位驱魔香图标并右键使用；
+        4. _finalize_bag 关闭背包并移开光标（异常/失败时同样执行）。
+
+        返回 True = 已处于驱魔状态或成功使用驱魔香；False = 任一步失败。
+        """
+        if not 0 <= hwnd_index < len(self.hwnd_list):
+            print(f"❌ hwnd_index={hwnd_index} 超出范围，当前游戏窗口数: {len(self.hwnd_list)}")
+            return False
+
         hwnd = self.hwnd_list[hwnd_index]
         self.current_hwnd = hwnd
         try:
             restore_window(hwnd)
             human_delay(0.1)
 
-            region = make_region(hwnd)
-            frame = self.grab_frame(region)
-            match = self.find(frame, self.resource.qu_mo_small_icon)
-
-            if match is None:
-                print("当前不在驱魔状态,使用驱魔香")
-                frame = self.wait_until(region, self.is_open_bag,
-                                        action=lambda: hotkey('alt', 'e', hwnd=hwnd),
-                                        action_first=True, want=True)
-                match = self.find(frame, self.resource.qu_mo_icon)
-                x, y = get_abs_x_y_cv_windows(match["bbox"])
-                windows_right_click(hwnd, x, y)
-                self.wait_until(region, self.is_open_bag,
-                                action=lambda: hotkey('alt', 'e', hwnd=hwnd),
-                                action_first=False, want=False)
-                # 把消息级光标移到客户区右下角，离开背包区域
-                fw, fh = self.roi[2], self.roi[3]
-                windows_move_to(hwnd, fw - 1, fh - 1)
-            else:
+            if self.is_in_qu_mo(self.grab_frame(hwnd, "gray")):
                 print("当前已经在驱魔状态")
+                return True
+
+            print("当前不在驱魔状态,使用驱魔香")
+            if not self._ensure_bag_open_hwnd(hwnd):
+                print("❌ 背包打开失败，无法使用驱魔香")
+                return False
+
+            if not self._click_icon_hwnd(hwnd, self.resource.qu_mo_icon, right=True):
+                print("❌ 背包中未找到驱魔香图标，未使用驱魔香")
+                return False
+
+            print("✅ 已右键使用驱魔香")
+            return True
         except Exception:
             traceback.print_exc()
-            human_delay(1)
+            return False
+        finally:
+            self._finalize_bag(hwnd)
 
     # 重置回合并确保自动战斗开启
     def reset_round(self, hwnd_index=0):
@@ -527,6 +572,46 @@ class GameController(BaoTaTasks, BaoTuTasks):
             return False
         self.click_match(match, region)
         return True
+
+    def reset_round_on_fight(self, hwnd_index=0):
+        """进入战斗时调用：按场次节流决定这一场要不要重置回合。
+
+        每进一场战斗计数 +1，只有第 1、6、11… 场（即 (count-1) % 5 == 0）
+        才真正执行 _reset_round_hwnd；其余场次直接跳过。一次重置可覆盖约
+        20 个回合，所以 5 场一次的频率足够，同时留了 4 场的容错余量：
+        自动战斗中途被打断，最多再等 4 场就会补一次重置。
+
+        :return: True = 本场执行了重置；False = 本场跳过或重置失败
+        """
+        try:
+            return self._reset_round_on_fight(self.hwnd_list[hwnd_index])
+        except Exception:
+            traceback.print_exc()
+            return False
+
+    def _reset_round_on_fight(self, hwnd):
+        """按 hwnd 维护战斗场次计数并节流重置（多窗口并行时各窗口独立计数）。
+
+        计数存在 self.fight_counts[hwnd]，reset_finish_status / refresh_hwnds
+        会同步清理，保证新一轮任务从「首次进入战斗」重新开始。
+        """
+        count = self.fight_counts.get(hwnd, 0) + 1
+        self.fight_counts[hwnd] = count
+
+        interval = max(1, reset_round_fight_interval)  # 防止常量被误配成 0
+        if (count - 1) % interval and hwnd not in self.reset_retry_hwnds:
+            print(f"⏭ 第 {count} 场战斗，跳过回合重置（每 {interval} 场一次）")
+            return False
+
+        print(f"🔁 第 {count} 场战斗，重置回合")
+        if self._reset_round_hwnd(hwnd):
+            self.reset_retry_hwnds.discard(hwnd)
+            return True
+
+        # 重置失败（自动按钮没找到等）不等到下一个周期：下一场补做一次
+        self.reset_retry_hwnds.add(hwnd)
+        print("⚠️ 回合重置失败，下一场战斗重试")
+        return False
 
     def open_bag(self, hwnd_index=0):
         try:
@@ -564,6 +649,62 @@ class GameController(BaoTaTasks, BaoTuTasks):
 
         print("❌ 背包打开失败")
         return False
+
+    def _ensure_bag_open_hwnd(self, hwnd):
+        """确保背包是打开的：已打开直接返回 True，否则交给 _open_bag_hwnd。
+
+        先判定再点击，避免对已打开的背包再点一次 bag_small（它是开关，
+        会把背包关上）。返回 True 表示当前确认背包处于打开状态。
+        """
+        region = make_region(hwnd)
+        if self.is_open_bag(self.grab_frame(region, "gray")):
+            print("✅ 背包已是打开状态")
+            return True
+        return self._open_bag_hwnd(hwnd)
+
+    def _close_bag_hwnd(self, hwnd, timeout=None):
+        """确保背包关闭：已关闭直接 True，否则点 bag_small（缺失则 alt+e）并等确认。
+
+        与 _open_bag_hwnd 对称，最终都用 is_open_bag 判定；超时仍未关闭返回
+        False。点击走消息级，不抢占真实光标，可多窗口并行。
+        """
+        timeout = close_bag_timeout if timeout is None else timeout
+        region = make_region(hwnd)
+        if not self.is_open_bag(self.grab_frame(region, "gray")):
+            return True
+
+        def toggle_bag():
+            match = self.find(self.grab_frame(region, "gray"),
+                              self.resource.bag_small_icon)
+            if match is not None:
+                self.click_match(match, region)
+
+        if self._wait_until_timeout(region, self.is_open_bag, want=False,
+                                    timeout=timeout, label="背包关闭",
+                                    action=toggle_bag, action_first=True,
+                                    lead=0.3, gap=0.5) is None:
+            return False  # 超时原因已由 _wait_until_timeout 打印
+        print("✅ 背包已关闭")
+        return True
+
+    def _move_cursor_off_bag(self, hwnd):
+        """把消息级光标移到客户区右下角，离开物品格以免弹出悬浮提示"""
+        fw, fh = self.roi[2], self.roi[3]
+        windows_move_to(hwnd, fw - 1, fh - 1)
+
+    def _finalize_bag(self, hwnd):
+        """背包收尾：先让右键动作生效，再关背包、移开光标。
+
+        自身吞掉异常，避免收尾失败覆盖主流程返回值；TaskTerminated 是
+        BaseException，不在此拦截，仍然照常向上传播。
+        """
+        try:
+            human_delay(0.5)  # 等右键使用物品的动作生效，再关背包
+            if not self._close_bag_hwnd(hwnd):
+                print("❌ 背包未能关闭，请手动检查")
+            self._move_cursor_off_bag(hwnd)
+        except Exception:
+            traceback.print_exc()
 
     # ---------- 业务流程 ----------
 
@@ -607,21 +748,6 @@ class GameController(BaoTaTasks, BaoTuTasks):
         if terminate_event.is_set():
             raise TaskTerminated("用户请求终止")
         print(f"🏁 {task_name}任务全部窗口处理完毕")
-
-    def run_auto_reset_round(self,is_hide=False,stop_event=None):
-        print("开始自动重置")
-        while True:
-            if is_stopped(stop_event):
-                break
-            for hwnd in self.hwnd_list:
-                if is_stopped(stop_event):
-                    break
-                self.current_hwnd = hwnd
-                restore_window(hwnd)
-                hotkey('ctrl', 'a', hwnd=hwnd)
-                if is_hide:
-                    win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
-                human_delay(5)
 
     def run_xun_you(self, hwnd_index=0, stop_event=None, run_all=False):
         """巡游任务（单窗口版，按 hwnd_index 定位目标窗口，与 run_xiu_ye 等一致）。
@@ -695,7 +821,7 @@ class GameController(BaoTaTasks, BaoTuTasks):
         press_key('f1', hwnd=hwnd)
         human_delay(1)
 
-        # 「有鱼」图标只加载一次，用项目统一的 cv2 模板匹配替代 pyautogui.locate
+        # 「有鱼」图标只加载一次，用项目统一的 cv2 模板匹配定位
         you_yu_templ = cv2.imread(str(you_yu_path), cv2.IMREAD_GRAYSCALE)
         if you_yu_templ is None:
             raise RuntimeError(f"钓鱼图标加载失败: {you_yu_path}")
@@ -723,6 +849,7 @@ class GameController(BaoTaTasks, BaoTuTasks):
             human_delay(1)
             break
 
+    # to-do
     def run_auto_task(self,task_name):
         win32gui.EnumWindows(self.get_hwnd, None)
         if not self.hwnd_list:
@@ -734,23 +861,8 @@ class GameController(BaoTaTasks, BaoTuTasks):
             try:
                 human_delay(1)
                 restore_window(hwnd)
-
                 # 先看看能不能找到该任务
                 human_delay(1)
-                frame = capture_client_only(hwnd)
-                ocr_result = self.ocr.get_ocr_from_image(frame, task_name)
-
-                if not ocr_result:
-                    print(f"❌ hwnd={hwnd} 上 OCR 找不到任务「{task_name}」")
-                    failed_hwnds.append(hwnd)
-                    continue
-
-                print(f"✅ 检测到任务 {task_name}")
-                best_bbox, best_text, best_conf = max(ocr_result, key=lambda x: x[2])
-                bbox = np.array(best_bbox)
-                center_x = int(np.mean(bbox[:, 0]))
-                center_y = int(np.mean(bbox[:, 1]))
-                windows_click(hwnd, center_x, center_y)
                 human_delay(1)
             except Exception:
                 print(f"❌ hwnd={hwnd} 执行 OCR 任务出错")
@@ -1247,4 +1359,148 @@ class GameController(BaoTaTasks, BaoTuTasks):
                     print("⚠️ yolo检测不完全，请手动点击")
 
         print("🏁 所有司南均已处理，挖宝流程结束")
+        return True
+
+    def _wait_until_timeout(self, region, predicate, want=True, timeout=60,
+                            label="目标", action=None, action_first=False,
+                            lead=1, gap=1, mode="gray"):
+        """wait_until 的超时包装：命中返回那一帧，超时打印原因并返回 None。
+
+        wait_until 自身是死循环，这里在 predicate 前加一道 deadline 检查，
+        到点抛内部信号 _WaitTimeout 结束轮询；human_delay 里的终止信号
+        （TaskTerminated，BaseException）仍然照常穿透，不被本方法拦截。
+        """
+        deadline = time.monotonic() + timeout
+
+        def guarded(frame):
+            if time.monotonic() > deadline:
+                raise _WaitTimeout
+            return predicate(frame)
+
+        try:
+            return self.wait_until(region, guarded, want=want, action=action,
+                                   action_first=action_first, lead=lead, gap=gap,
+                                   mode=mode)
+        except _WaitTimeout:
+            print(f"❌ {label}等待超时（{timeout}s 内未{'出现' if want else '结束'}）")
+            return None
+
+    def _click_icon_hwnd(self, hwnd, icon, retries=None, gap=None, right=False):
+        """截图匹配 icon 并消息级点击（right=True 走右键）；成功 True，未匹配到 False
+
+        只做「匹配到就点」，不会靠操作让图标出现，因此仅适用于图标应该已在
+        当前页面上的场景（活动入口、星级按钮、背包物品这类）。
+        """
+        retries = men_pai_lun_jian_click_retries if retries is None else retries
+        gap = men_pai_lun_jian_click_gap if gap is None else gap
+        region = make_region(hwnd)
+        for attempt in range(1, retries + 1):
+            match = self.find(self.grab_frame(region, "gray"), icon)
+            if match is not None:
+                if right:
+                    x, y = get_abs_x_y_cv_windows(match["bbox"])
+                    windows_move_to(hwnd, x, y)
+                    windows_right_click(hwnd, x, y)
+                else:
+                    self.click_match(match, region)
+                return True
+            print(f"⚠️ 第 {attempt}/{retries} 次未匹配到图标，{gap}s 后重试")
+            if attempt < retries:
+                human_delay(gap)
+        return False
+
+    def men_pai_lun_jian(self, hwnd_index=0, stop_event=None):
+        """门派论剑：一轮 = 点入口 → 等寻路结束 → 点 4 星 → 打一场并等战斗结束。
+
+        该任务需要连续多场战斗才能完成，因此整轮流程放在循环里：每场战斗结束
+        后检测界面上是否还有 men_pai_lun_jian_icon，
+        - 检测到 → 说明还有后续场次，回到循环开头再打一轮；
+        - 检测不到 → 任务完成，正常返回 True。
+
+        单轮内各步严格按顺序串联，失败即返回 False：
+        1. 匹配 men_pai_lun_jian_icon 并点击，连续多次匹配不到视为入口不可用
+           （首轮失败＝入口不可用；后续轮失败＝图标已消失，按任务完成处理）；
+        2. 先确认自动寻路图标出现（入口直接传送则只告警），再等到它消失；
+        3. 匹配 star_4_icon 并点击；
+        4. 先等到进入战斗，再等到 is_in_fight 消失（战斗结束），然后关闭对话。
+
+        行级停止（stop_event）靠 human_delay 的终止信号生效，会抛 TaskTerminated。
+        """
+        if not 0 <= hwnd_index < len(self.hwnd_list):
+            print(f"❌ hwnd_index={hwnd_index} 超出范围，当前游戏窗口数: {len(self.hwnd_list)}")
+            return False
+        if is_stopped(stop_event):
+            return False
+
+        hwnd = self.hwnd_list[hwnd_index]
+        self.current_hwnd = hwnd
+        region = make_region(hwnd)
+        print("🎯 开始门派论剑（多轮战斗，以门派论剑图标是否仍存在作为继续条件）")
+
+        round_no = 0
+        while True:
+            if is_stopped(stop_event):
+                print("⏹ 门派论剑收到停止信号，退出战斗循环")
+                break
+
+            round_no += 1
+            print(f"⚔️ 门派论剑第 {round_no} 轮开始")
+
+            # 1. 点击活动面板里的门派论剑入口
+            if not self._click_icon_hwnd(hwnd, self.resource.men_pai_lun_jian_icon):
+                if round_no == 1:
+                    print("❌ 未匹配到门派论剑入口图标，流程终止")
+                    return False
+                print("🏁 未检测到门派论剑图标，任务完成")
+                return True
+            print("✅ 已点击门派论剑入口")
+
+            # 2. 等自动寻路结束（寻路图标消失）
+            if self._wait_until_timeout(
+                    region, self.is_has_xun_lu, want=True,
+                    timeout=men_pai_lun_jian_xun_lu_start_timeout,
+                    label="自动寻路图标", lead=2) is None:
+                print("⚠️ 未检测到自动寻路图标，可能入口直接传送，继续后续流程")
+            if self._wait_until_timeout(
+                    region, self.is_has_xun_lu, want=False,
+                    timeout=men_pai_lun_jian_xun_lu_timeout,
+                    label="自动寻路", lead=1, gap=1) is None:
+                return False
+            print("✅ 自动寻路结束")
+
+            # 3. 点击 4 星难度（星级按钮此时应已出现）
+            if not self._click_icon_hwnd(hwnd, self.resource.star_4_icon):
+                print("❌ 未匹配到 4 星图标，流程终止")
+                return False
+            print("✅ 已点击 4 星难度")
+
+            # 4. 等进入战斗，再等战斗结束
+            if self._wait_until_timeout(
+                    region, self.is_in_fight, want=True,
+                    timeout=men_pai_lun_jian_fight_timeout,
+                    label="进入战斗", lead=1, gap=1) is None:
+                print("❌ 点击 4 星后未进入战斗，流程终止")
+                return False
+
+            self.reset_round(hwnd_index)
+
+            if self._wait_until_timeout(
+                    region, self.is_in_fight, want=False,
+                    timeout=men_pai_lun_jian_fight_timeout,
+                    label="战斗", lead=2, gap=2) is None:
+                print("❌ 战斗未在超时内结束，流程终止")
+                return False
+
+            self.wait_until(region, self.is_has_talk, lead=1,want=False,
+                                                    action=lambda: self.close_talk(region))
+            print(f"🏁 第 {round_no} 场战斗结束")
+
+            # 5. 战斗结束后检测入口图标：还在就继续下一轮，消失即任务完成
+            human_delay(1)  # 等结算/对话界面退回活动面板后再判定
+            frame = self.grab_frame(region, "gray")
+            if self.find(frame, self.resource.men_pai_lun_jian_icon) is None:
+                print("🏁 未检测到门派论剑图标，任务完成")
+                return True
+            print(f"🔁 检测到门派论剑图标，继续第 {round_no + 1} 轮战斗")
+
         return True

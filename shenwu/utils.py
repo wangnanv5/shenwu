@@ -1,15 +1,14 @@
-"""兼容层 + 通用杂项。
+"""通用杂项（坐标换算、legacy 截图/冻结检测）+ 一条历史兼容导出。
 
-底层能力已按职责拆分：
+底层能力已按职责拆分，请直接引用对应模块：
 - shenwu.timing      —— 终止信号、human_delay / rand_secs
 - shenwu.game_window —— 窗口识别（标题解析）、客户区几何、region
 - shenwu.vision      —— 模板匹配、颜色/格子识别（纯计算）
 - shenwu.win_input   —— 键鼠输入（消息级 + 真实注入）
 - shenwu.capture     —— WGC 客户区截图
 
-本模块保留历史入口（`from shenwu.utils import X` 仍然可用）以及尚未归类的
-通用函数（坐标换算、legacy 截图/冻结检测）。新增代码请直接引用上面的模块，
-不要再往这里堆逻辑。
+历史重导出已清理，仅保留 human_delay（main.py 仍从这里取），新增代码不要
+再往这里堆兼容入口。
 """
 
 import time
@@ -18,23 +17,8 @@ import cv2
 import numpy as np
 from PIL import ImageGrab
 
-from shenwu.timing import (  # noqa: F401  (兼容导出)
-    TaskTerminated, terminate_event, request_terminate, clear_terminate,
-    bind_thread_terminate, rand_secs, human_delay,
-)
-from shenwu.game_window import (  # noqa: F401  (兼容导出)
-    GAME_TITLE_PATTERN, SHELL_WINDOW_CLASSES, SHELL_TITLE_BLACKLIST, parse_game_title,
-    get_client_rect, get_physical_client_rect, make_region, restore_window, set_current_top,
-)
-from shenwu.vision import (  # noqa: F401  (兼容导出)
-    FIND_ALL_MAX_CANDIDATES, find_best_match, find_all_match,
-    keep_largest_component, get_color, generate_grid_mask,
-)
-from shenwu.win_input import (  # noqa: F401  (兼容导出)
-    windows_key, windows_hotkey, press_key, hotkey,
-    windows_move_to, move_cursor_to, windows_click, windows_right_click, windows_scroll,
-)
-from shenwu.capture import get_offsets, capture_client_only  # noqa: F401  (兼容导出)
+from shenwu.game_window import get_client_rect
+from shenwu.timing import human_delay  # noqa: F401  (兼容导出：main.py 使用)
 
 
 # ---------- 通用杂项 ----------

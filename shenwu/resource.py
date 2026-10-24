@@ -40,6 +40,8 @@ class GameResource:
         # 自动战斗按钮（small 为已开启状态的缩小图）
         self.zi_dong_icon = self._load_gray(zi_dong_path)
         self.zi_dong_small_icon = self._load_gray(zi_dong_small_path)
+        # 星级图标（4 星）
+        self.star_4_icon = self._load_gray(star_4_path)
         # 驱魔相关
         self.qu_mo_small_icon = self._load_gray(qu_mo_small_path)
         self.qu_mo_icon = self._load_gray(qu_mo_icon_path)
@@ -81,6 +83,8 @@ class GameResource:
 
         # 活动
         self.si_nan_icon = self._load_gray(si_nan_icon_path)
+        # 门派论剑
+        self.men_pai_lun_jian_icon = self._load_gray(men_pai_lun_jian_path)
         # 宝塔
         self.bao_ta_kai_shi_tiao_zhan_icon = self._load_gray(bao_ta_kai_shi_tiao_zhan)
         self.bao_ta_xing_ji_tiao_jian_icon = self._load_gray(bao_ta_xing_ji_tiao_jian)

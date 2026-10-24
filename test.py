@@ -9,4 +9,4 @@ if __name__ == '__main__':
     # game_controller.run_xiu_ye(run_all=True)
     # game_controller.run_xiu_lian(run_all=True)
     # game_controller.run_xun_you(run_all=True)
-    game_controller.bao_tu()
+    game_controller.check_qu_mo()

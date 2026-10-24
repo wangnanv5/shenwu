@@ -4,13 +4,13 @@ This file provides guidance to CodeBuddy Code when working with code in this rep
 
 # shenwu
 
-Windows 桌面游戏自动化脚本，针对游戏《幻唐志》。通过 OpenCV 模板匹配识别界面元素，配合 pyautogui / win32 模拟键鼠操作，支持多窗口并行。
+Windows 桌面游戏自动化脚本，针对游戏《幻唐志》。通过 OpenCV 模板匹配识别界面元素，配合 win32 消息级键鼠输入（仅少量游戏热键走 keybd_event 真实注入）操作窗口，支持多窗口并行。
 
 ## 运行环境
 
 - Windows 11，Python 3.12，依赖用 uv 管理（`uv.lock`、`.venv`）
 - 必须在**游戏窗口已打开**的情况下运行：`GameController.__init__` 会枚举窗口并 `assert`，找不到窗口直接失败。`GameController` 通过 `get_controller()`（`lru_cache` 懒加载）获取，命令体内才构造，所以 `--help` 不需要先开游戏窗口
-- 命令行启动时设置了 `SetProcessDpiAwareness(2)`，坐标一律按屏幕绝对像素处理；**GUI 例外** —— 一个进程只允许设置一次 DPI 感知，而 `pyautogui` 导入时会把它设成 `SYSTEM_DPI_AWARE(1)`，两者都会抢在 Qt 前面，导致 Qt 打印「SetProcessDpiAwarenessContext() failed: 拒绝访问」。因此 `main.py` 在 `gui` 命令下既不设置 DPI 也不导入 `controller_cv` / `utils`，GUI 里的 `controller_cv` 导入全部延后到 `QApplication` 创建之后，由 Qt 自己设成 `PER_MONITOR_AWARE_V2`（实测 radio / roi 与命令行模式完全一致）
+- 命令行启动时设置了 `SetProcessDpiAwareness(2)`，坐标一律按屏幕绝对像素处理；**GUI 例外** —— 一个进程只允许设置一次 DPI 感知，`main.py` 在 `gui` 命令下既不设置 DPI 也不提前导入 `controller_cv` / `utils`，GUI 里的 `controller_cv` 导入全部延后到 `QApplication` 创建之后，由 Qt 自己设成 `PER_MONITOR_AWARE_V2`（实测 radio / roi 与命令行模式完全一致）
 
 ## 常用命令
 
@@ -75,8 +75,6 @@ uv run python main.py test-get-color --color blue  # 诊断：实时可视化 ge
 
 **立即终止**：`timing.terminate_event` 是全局终止信号；`human_delay` 按 ≤0.1s 分片睡眠并在每片检查，置位后立刻抛 `TaskTerminated`（继承 **BaseException**，专门绕过业务里 `except Exception` 的逐窗口兜底）。GUI 单行「停止」走行级事件（`bind_thread_terminate`），只打断该线程；「全部停止」额外置全局信号。`RowWorker.run()` 开头 `clear_terminate()`，否则上一次紧急停止会让后续任务刚启动就退出。代价：终止会把任务留在中间状态（背包可能没关等），这是「立即终止」的固有语义。
 
-**humancursor 边界补丁**：`generate_random_curve_parameters` 在点击坐标落在 `pyautogui.size()` 的 15%~85% 区间外（多开铺到副屏/负坐标区）时会把 `offset_boundary_x/y` 置 0；此时若鼠标已在目标点，`range(l, r)` 为空，库内回退 `np.random.choice(l_boundary)`，负坐标下抛 `ValueError: a must be greater than 0`。`utils.py` 里用 `_safe_generate_internal_knots` 替换了 `HumanizeMouseTrajectory.generate_internal_knots`：空范围以左边界撑开 1 像素，采样区间恒非空。改 humancursor 行为只能改这里，不要去动 site-packages。
-
 **单窗口容错**：巡游 / 修业 / 修炼的每个窗口处理都包了 try/except，出错只记 `window_fail_counts`，连续失败 `MAX_WINDOW_FAILS`(3) 次才标记该窗口完成并跳过，任务结束汇总失败窗口；`check_qu_mo` / `run_auto_task` 同样逐窗口容错。这样坏窗口不会拖死整个任务，也不会因为一次抖动就放弃。`reset_finish_status()` 会顺带清空失败计数，`controller.current_hwnd` 记录正在处理哪个窗口（GUI 用它把边框文字改成 `▶ 当前任务`）。
 
 **GUI 配置持久化**：`shenwu/gui/settings.py` 用 json 存项目根的 `gui_settings.json`（队列顺序、各任务参数、轮次/间隔/出错继续、定时、日志开关、上次选中的服务器名、OCR 任务名历史、诊断阈值）。窗口列表按**服务器名**恢复多选，避免 hwnd 每次都变。
@@ -93,16 +91,16 @@ uv run python main.py test-get-color --color blue  # 诊断：实时可视化 ge
 
 **流程写法**：业务流程 = 一串 `wait_until` 调用。每个页面判断方法（`is_has_talk` 等）都是一行 `self.find(...) is not None`，它们既用于 `if`，也作为 predicate 传给 `wait_until`。
 
-**延迟有两个函数**（`timing.py`，`utils` 兼容重导出）：`human_delay(x)` 只睡眠（绝大多数场景）；`rand_secs(x)` 只返回随机秒数（给 `pyautogui.moveTo(duration=...)` 这类要值的参数用）。别把 `human_delay` 的返回值当数字用。
+**延迟有两个函数**（`timing.py`，`utils` 兼容重导出）：`human_delay(x)` 只睡眠（绝大多数场景）；`rand_secs(x)` 只返回随机秒数（给需要具体秒数的参数用，如动画/等待时长）。别把 `human_delay` 的返回值当数字用。
 
 **OCR 是懒加载的**：`self.ocr` 是 `cached_property`，构造 `Ocr()` 会加载 ONNX 模型，别挪进 `__init__`。
 
 ## 已知问题
 
-- `run_auto_task` / `run_fish` 是另一套实现（PIL `ImageGrab` + OCR/模板），OCR 任务已改成遍历 `hwnd_list`，钓鱼仍只用第一个窗口
+- `run_auto_task` 目前是占位实现（只遍历 `hwnd_list`，未接 OCR）；`run_fish` 用 WGC 截图 + cv2 模板匹配，且只用第一个窗口
 - `get_color` 里裁剪比例（0.66/0.27 ~ 0.95/0.38）是硬编码的（虽然按帧宽高比例计算，但绑定修炼任务面板布局）；`generate_grid_mask` 的比例切片（0.478/0.191 ~ 0.783/0.830）和 800~3000 像素面积过滤同样绑定当前分辨率，换窗口尺寸要一起调
 - `utils.py` 中 `check_is_frozen` / `get_abs_x_y` / `get_hwnd_image` 主链路已不用，只为 `legacy/` 保留（其余能力已迁至 timing / game_window / vision / win_input / capture）
-- `run_fish` 走的是另一套识别路径（PIL `ImageGrab` + `pyautogui.locate`，不是 mss + cv2），只用第一个窗口
+
 
 ## 约定
 

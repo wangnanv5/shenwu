@@ -1,18 +1,24 @@
 {
   "queues": {
-    "其他": [],
-    "test": [
+    "测试": [],
+    "修炼": [
+      {
+        "key": "xiu_lian",
+        "params": {}
+      }
+    ],
+    "挖宝图": [
+      {
+        "key": "bao_tu",
+        "params": {}
+      }
+    ],
+    "宝塔": [
       {
         "key": "bao_ta",
         "params": {
           "count": "50"
         }
-      }
-    ],
-    "师门": [
-      {
-        "key": "xiu_ye",
-        "params": {}
       }
     ],
     "日常": [
@@ -24,21 +30,15 @@
         "key": "xiu_lian",
         "params": {}
       }
-    ],
-    "宝图": [
-      {
-        "key": "bao_tu",
-        "params": {}
-      }
     ]
   },
   "bindings": {
-    "三生万物": "日常"
+    "三生万物": "挖宝图"
   },
-  "active_queue": "师门",
+  "active_queue": "日常",
   "params": {
     "bao_ta": {
-      "count": "50"
+      "count": ""
     }
   },
   "selected_servers": [],

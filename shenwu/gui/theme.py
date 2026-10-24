@@ -20,6 +20,8 @@
 - QFrame#card[state]  : idle / running / stopping，locked="true" 表示被其它任务占用
 """
 
+from PyQt6.QtWidgets import QWidget
+
 QSS = """
 /* ---------- 全局 ---------- */
 QWidget#root {
@@ -390,3 +392,15 @@ QMenu::separator {
     margin: 4px 8px;
 }
 """
+
+
+def repolish(widget: QWidget) -> None:
+    """动态属性（state / locked）改动后强制重刷样式。
+
+    Qt 不会自动感知 setProperty 后继的样式变化，必须 unpolish/polish 一次，
+    否则 QFrame#card[state="running"]、QLabel#pill[state] 这类选择器不生效。
+    """
+    style = widget.style()
+    style.unpolish(widget)
+    style.polish(widget)
+    widget.update()

@@ -237,28 +237,6 @@ def windows_move_to(hwnd, x, y, steps=None, interval=0.01):
     )
 
 
-def move_cursor_to(hwnd, x, y, steps=None, interval=0.01):
-    """把真实系统光标渐进移动到窗口客户区 (x, y) 对应的屏幕位置
-
-    适用于游戏轮询 GetCursorPos()/原始输入（而非消息队列）的情况：
-    只有真实光标变化才能触发这类游戏的悬停判定。不改变窗口焦点。
-    注意：会占用真实鼠标，多窗口并行时同一时刻只能对一个窗口生效。
-
-    :param steps: 中间点数，缺省按距离每 20px 一点，最多 30 点
-    :param interval: 相邻两点的间隔秒数
-    """
-    _check_message_target(hwnd, x, y)
-    ex, ey = win32gui.ClientToScreen(hwnd, (x, y))
-    sx, sy = win32api.GetCursorPos()
-    if steps is None:
-        dist = max(abs(ex - sx), abs(ey - sy))
-        steps = min(30, max(1, dist // 20))
-    _interpolate_move(
-        lambda px, py: win32api.SetCursorPos((px, py)),
-        sx, sy, ex, ey, steps, interval,
-    )
-
-
 def _check_click_target(hwnd, x, y):
     """点击专用校验：在 16 位范围之外再校验客户区，越界点击会静默落空，必须尽早报错。
 
@@ -280,11 +258,22 @@ def windows_click(hwnd, x, y):
     win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lparam)
 
 
-def windows_right_click(hwnd, x, y):
-    """向窗口投递一次鼠标右键点击，不用置顶窗口"""
+def windows_right_click(hwnd, x, y, hover_delay=0.05):
+    """向窗口投递一次鼠标右键点击，不用置顶窗口。
+
+    顺序是硬性要求：必须先用 windows_move_to 把光标消息移到 (x, y)，
+    再投递 WM_RBUTTONDOWN/UP。右键消息的 lParam 只带坐标，游戏判定
+    「这一下右键作用在哪个目标」时看的是悬停状态——它由 WM_MOUSEMOVE
+    更新出来的格子/对象决定。省掉移动这一步，游戏侧没有悬停目标，
+    右键会被静默丢弃（背包开着却用不了物品、右键司南没反应），
+    日志里看不出任何错误。
+
+    :param hover_delay: 移动到目标后、按下右键前的停顿，给悬停状态更新的时间
+    """
     _check_click_target(hwnd, x, y)
-    # _post_mouse_move(hwnd, x, y)
-    human_delay(0.02)
+    windows_move_to(hwnd, x, y)
+    if hover_delay:
+        human_delay(hover_delay)
     lparam = MAKELPARAM(x, y)
     win32gui.PostMessage(hwnd, win32con.WM_RBUTTONDOWN, win32con.MK_RBUTTON, lparam)
     human_delay(0.05)

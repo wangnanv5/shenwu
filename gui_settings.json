@@ -1,26 +1,5 @@
 {
   "queues": {
-    "测试": [],
-    "修炼": [
-      {
-        "key": "xiu_lian",
-        "params": {}
-      }
-    ],
-    "挖宝图": [
-      {
-        "key": "bao_tu",
-        "params": {}
-      }
-    ],
-    "宝塔": [
-      {
-        "key": "bao_ta",
-        "params": {
-          "count": "50"
-        }
-      }
-    ],
     "日常": [
       {
         "key": "xiu_ye",
@@ -30,15 +9,30 @@
         "key": "xiu_lian",
         "params": {}
       }
+    ],
+    "宝图": [
+      {
+        "key": "bao_tu",
+        "params": {}
+      }
+    ],
+    "巡游": [
+      {
+        "key": "xun_you",
+        "params": {}
+      }
     ]
   },
   "bindings": {
-    "三生万物": "挖宝图"
+    "少年游": "巡游"
   },
-  "active_queue": "日常",
+  "active_queue": "巡游",
   "params": {
     "bao_ta": {
       "count": ""
+    },
+    "reset_round": {
+      "interval": "3"
     }
   },
   "selected_servers": [],
@@ -53,5 +47,6 @@
     "enabled": false,
     "time": "12:00"
   },
+  "license_key": "SW-2A2E-EAAE-8GP2-9DXW",
   "selected_server": "三生万物"
 }

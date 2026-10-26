@@ -1,0 +1,438 @@
+<?xml version='1.0' encoding='utf8'?>
+<nuitka-compilation-report nuitka_version="4.3.1" nuitka_commercial_version="not installed" mode="accelerated" completion="error exit message (1)" exit_message="Failed unexpectedly in Scons C backend compilation.">
+  <module name="__main__" kind="PythonMainModule" usage="root_module" reason="Root module" source_path="${cwd}\main.py">
+    <plugin-influence name="implicit-imports" influence="condition-used" condition="module_mode and plugin(&quot;pyside6&quot;)" tags_used="module_mode" result="false" />
+    <optimization-time pass="1" time="0.4375" micro_passes="4" max_branch_merge="3" merged_total="89" />
+    <optimization-time pass="2" time="0.0156" micro_passes="1" max_branch_merge="3" merged_total="20" />
+    <code-generation-time time="0.1094" />
+    <module_usages>
+      <module_usage name="site" finding="excluded" line="1" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="pywin32_bootstrap" finding="absolute" line="1" reason="import" />
+      <module_usage name="sys" finding="absolute" line="1" reason="import" />
+      <module_usage name="traceback" finding="excluded" line="2" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="click" finding="absolute" line="4" reason="import" />
+      <module_usage name="ctypes" finding="excluded" line="8" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="shenwu.controller_cv" finding="absolute" line="26" reason="import" />
+      <module_usage name="shenwu.utils" finding="absolute" line="27" reason="import" />
+      <module_usage name="shenwu.gui" finding="absolute" line="86" reason="import" />
+      <module_usage name="shenwu.gui.run_gui" finding="not-found" line="86" reason="import fromlist" />
+    </module_usages>
+  </module>
+  <module name="shenwu" kind="CompiledPythonPackage" usage="import path parent" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\__init__.py">
+    <optimization-time pass="1" time="0.0000" micro_passes="2" />
+    <optimization-time pass="2" time="0.0156" micro_passes="1" />
+    <code-generation-time time="0.0000" />
+    <module_usages />
+  </module>
+  <module name="shenwu.capture" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\capture.py">
+    <optimization-time pass="1" time="0.0625" micro_passes="4" max_branch_merge="11" merged_total="349" />
+    <optimization-time pass="2" time="0.0156" micro_passes="1" max_branch_merge="11" merged_total="87" />
+    <code-generation-time time="0.0312" />
+    <module_usages>
+      <module_usage name="ctypes" finding="excluded" line="7" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="win32gui" finding="excluded" line="8" reason="import" exclusion_reason="Extension modules cannot be inspected." />
+      <module_usage name="ctypes.wintypes" finding="absolute" line="9" reason="import" />
+      <module_usage name="cv2" finding="absolute" line="11" reason="import" />
+      <module_usage name="windows_capture" finding="not-found" line="12" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.config" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\config.py">
+    <optimization-time pass="1" time="0.0156" micro_passes="2" />
+    <optimization-time pass="2" time="0.0000" micro_passes="1" />
+    <code-generation-time time="0.0312" />
+    <module_usages>
+      <module_usage name="pathlib" finding="excluded" line="1" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="shenwu.controller_cv" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\controller_cv.py">
+    <optimization-time pass="1" time="1.6250" micro_passes="6" max_branch_merge="71" merged_total="7437" />
+    <optimization-time pass="2" time="0.2031" micro_passes="1" max_branch_merge="71" merged_total="1221" />
+    <code-generation-time time="0.5000" />
+    <module_usages>
+      <module_usage name="functools" finding="excluded" line="1" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="os" finding="excluded" line="2" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="threading" finding="excluded" line="3" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="time" finding="absolute" line="4" reason="import" />
+      <module_usage name="enum" finding="excluded" line="5" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="traceback" finding="excluded" line="7" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="win32gui" finding="excluded" line="8" reason="import" exclusion_reason="Extension modules cannot be inspected." />
+      <module_usage name="win32process" finding="excluded" line="9" reason="import" exclusion_reason="Extension modules cannot be inspected." />
+      <module_usage name="cv2" finding="absolute" line="10" reason="import" />
+      <module_usage name="munch" finding="not-found" line="11" reason="import" />
+      <module_usage name="shenwu.capture" finding="absolute" line="13" reason="import" />
+      <module_usage name="shenwu.config" finding="absolute" line="14" reason="import" />
+      <module_usage name="shenwu.game_window" finding="absolute" line="15" reason="import" />
+      <module_usage name="shenwu.resource" finding="absolute" line="18" reason="import" />
+      <module_usage name="shenwu.tasks.bao_ta" finding="absolute" line="19" reason="import" />
+      <module_usage name="shenwu.tasks.bao_tu" finding="absolute" line="22" reason="import" />
+      <module_usage name="shenwu.timing" finding="absolute" line="23" reason="import" />
+      <module_usage name="shenwu.utils" finding="absolute" line="24" reason="import" />
+      <module_usage name="shenwu.vision" finding="absolute" line="25" reason="import" />
+      <module_usage name="shenwu.win_input" finding="absolute" line="26" reason="import" />
+      <module_usage name="shenwu.yolo_detector" finding="absolute" line="29" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.game_window" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\game_window.py">
+    <optimization-time pass="1" time="0.0781" micro_passes="3" max_branch_merge="10" merged_total="337" />
+    <optimization-time pass="2" time="0.0156" micro_passes="1" max_branch_merge="10" merged_total="113" />
+    <code-generation-time time="0.0469" />
+    <module_usages>
+      <module_usage name="ctypes" finding="excluded" line="12" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="re" finding="excluded" line="13" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="win32con" finding="absolute" line="15" reason="import" />
+      <module_usage name="win32gui" finding="excluded" line="16" reason="import" exclusion_reason="Extension modules cannot be inspected." />
+      <module_usage name="ctypes.wintypes" finding="absolute" line="17" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.gui" kind="CompiledPythonPackage" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\gui\__init__.py">
+    <optimization-time pass="1" time="0.3750" micro_passes="2" max_branch_merge="2" merged_total="4" />
+    <optimization-time pass="2" time="0.0000" micro_passes="1" max_branch_merge="2" merged_total="2" />
+    <code-generation-time time="0.0156" />
+    <module_usages>
+      <module_usage name="shenwu.gui.main_window" finding="absolute" line="3" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.gui.app_icon" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\gui\app_icon.py">
+    <optimization-time pass="1" time="0.1094" micro_passes="5" max_branch_merge="23" merged_total="382" />
+    <optimization-time pass="2" time="0.0312" micro_passes="1" max_branch_merge="23" merged_total="77" />
+    <code-generation-time time="0.0312" />
+    <module_usages>
+      <module_usage name="__future__" finding="excluded" line="6" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="PIL" finding="absolute" line="8" reason="import" />
+      <module_usage name="PIL.Image" finding="relative" line="8" reason="import fromlist" />
+      <module_usage name="PIL.ImageDraw" finding="relative" line="8" reason="import fromlist" />
+      <module_usage name="PyQt6.QtGui" finding="not-found" line="9" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.gui.license" kind="CompiledPythonModule" usage="import fromlist" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\gui\license.py">
+    <optimization-time pass="1" time="0.2031" micro_passes="5" max_branch_merge="11" merged_total="1446" />
+    <optimization-time pass="2" time="0.0312" micro_passes="1" max_branch_merge="11" merged_total="282" />
+    <code-generation-time time="0.1250" />
+    <module_usages>
+      <module_usage name="__future__" finding="excluded" line="26" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="hashlib" finding="excluded" line="28" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="json" finding="excluded" line="29" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="os" finding="excluded" line="30" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="socket" finding="excluded" line="31" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ssl" finding="excluded" line="32" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="threading" finding="excluded" line="33" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="urllib.error" finding="absolute" line="34" reason="import" />
+      <module_usage name="urllib.parse" finding="absolute" line="35" reason="import" />
+      <module_usage name="urllib.request" finding="absolute" line="36" reason="import" />
+      <module_usage name="uuid" finding="excluded" line="37" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="PyQt6.QtWidgets" finding="not-found" line="39" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.gui.main_window" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\gui\main_window.py">
+    <optimization-time pass="1" time="1.5938" micro_passes="7" max_branch_merge="76" merged_total="8843" />
+    <optimization-time pass="2" time="0.1875" micro_passes="1" max_branch_merge="76" merged_total="1239" />
+    <code-generation-time time="0.5156" />
+    <module_usages>
+      <module_usage name="__future__" finding="excluded" line="11" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ctypes" finding="excluded" line="13" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="sys" finding="absolute" line="14" reason="import" />
+      <module_usage name="threading" finding="excluded" line="15" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="time" finding="absolute" line="16" reason="import" />
+      <module_usage name="PyQt6.QtCore" finding="not-found" line="18" reason="import" />
+      <module_usage name="PyQt6.QtGui" finding="not-found" line="19" reason="import" />
+      <module_usage name="PyQt6.QtWidgets" finding="not-found" line="20" reason="import" />
+      <module_usage name="win32con" finding="absolute" line="52" reason="import" />
+      <module_usage name="win32gui" finding="excluded" line="53" reason="import" exclusion_reason="Extension modules cannot be inspected." />
+      <module_usage name="shenwu.gui" finding="absolute" line="55" reason="import" />
+      <module_usage name="shenwu.gui.license" finding="relative" line="55" reason="import fromlist" />
+      <module_usage name="shenwu.gui" finding="absolute" line="56" reason="import" />
+      <module_usage name="shenwu.gui.settings" finding="relative" line="56" reason="import fromlist" />
+      <module_usage name="shenwu.gui.tasks" finding="absolute" line="57" reason="import" />
+      <module_usage name="shenwu.gui.theme" finding="absolute" line="58" reason="import" />
+      <module_usage name="shenwu.gui.workers" finding="absolute" line="59" reason="import" />
+      <module_usage name="shenwu.controller_cv" finding="absolute" line="256" reason="import" />
+      <module_usage name="shenwu.controller_cv" finding="absolute" line="817" reason="import" />
+      <module_usage name="shenwu.controller_cv" finding="absolute" line="1042" reason="import" />
+      <module_usage name="shenwu.timing" finding="absolute" line="1073" reason="import" />
+      <module_usage name="shenwu.windows_utils" finding="absolute" line="1138" reason="import" />
+      <module_usage name="shenwu.controller_cv" finding="absolute" line="1190" reason="import" />
+      <module_usage name="shenwu.controller_cv" finding="absolute" line="1251" reason="import" />
+      <module_usage name="schedule" finding="not-found" line="1362" reason="import" />
+      <module_usage name="schedule" finding="not-found" line="1380" reason="import" />
+      <module_usage name="PyQt6.QtCore" finding="not-found" line="1502" reason="import" />
+      <module_usage name="shenwu.gui.app_icon" finding="absolute" line="1539" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.gui.settings" kind="CompiledPythonModule" usage="import fromlist" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\gui\settings.py">
+    <optimization-time pass="1" time="0.0469" micro_passes="4" max_branch_merge="12" merged_total="247" />
+    <optimization-time pass="2" time="0.0156" micro_passes="1" max_branch_merge="10" merged_total="61" />
+    <code-generation-time time="0.0312" />
+    <module_usages>
+      <module_usage name="__future__" finding="excluded" line="7" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="json" finding="excluded" line="9" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="pathlib" finding="excluded" line="10" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="shenwu.gui.tasks" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\gui\tasks.py">
+    <optimization-time pass="1" time="0.1094" micro_passes="4" max_branch_merge="13" merged_total="642" />
+    <optimization-time pass="2" time="0.0312" micro_passes="1" max_branch_merge="13" merged_total="157" />
+    <code-generation-time time="0.0625" />
+    <module_usages>
+      <module_usage name="dataclasses" finding="excluded" line="8" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="PyQt6.QtCore" finding="not-found" line="10" reason="import" />
+      <module_usage name="PyQt6.QtWidgets" finding="not-found" line="11" reason="import" />
+      <module_usage name="shenwu.gui.theme" finding="absolute" line="16" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.gui.theme" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\gui\theme.py">
+    <optimization-time pass="1" time="0.0000" micro_passes="3" max_branch_merge="2" merged_total="9" />
+    <optimization-time pass="2" time="0.0156" micro_passes="1" max_branch_merge="2" merged_total="3" />
+    <code-generation-time time="0.0000" />
+    <module_usages>
+      <module_usage name="PyQt6.QtWidgets" finding="not-found" line="23" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.gui.workers" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\gui\workers.py">
+    <optimization-time pass="1" time="0.0938" micro_passes="5" max_branch_merge="31" merged_total="685" />
+    <optimization-time pass="2" time="0.0312" micro_passes="1" max_branch_merge="31" merged_total="138" />
+    <code-generation-time time="0.0469" />
+    <module_usages>
+      <module_usage name="__future__" finding="excluded" line="17" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="threading" finding="excluded" line="19" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="time" finding="absolute" line="20" reason="import" />
+      <module_usage name="traceback" finding="excluded" line="21" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="shenwu.timing" finding="absolute" line="111" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.resource" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\resource.py">
+    <optimization-time pass="1" time="0.0469" micro_passes="4" max_branch_merge="7" merged_total="82" />
+    <optimization-time pass="2" time="0.0156" micro_passes="1" max_branch_merge="4" merged_total="14" />
+    <code-generation-time time="0.0469" />
+    <module_usages>
+      <module_usage name="cv2" finding="absolute" line="1" reason="import" />
+      <module_usage name="shenwu.config" finding="absolute" line="3" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.tasks" kind="CompiledPythonPackage" usage="import path parent" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\tasks\__init__.py">
+    <optimization-time pass="1" time="0.0156" micro_passes="2" />
+    <optimization-time pass="2" time="0.0000" micro_passes="1" />
+    <code-generation-time time="0.0000" />
+    <module_usages>
+      <module_usage name="shenwu.tasks.bao_ta" finding="absolute" line="13" reason="import" />
+      <module_usage name="shenwu.tasks.bao_tu" finding="absolute" line="14" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.tasks.bao_ta" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\tasks\bao_ta.py">
+    <optimization-time pass="1" time="0.2812" micro_passes="7" max_branch_merge="36" merged_total="1328" />
+    <optimization-time pass="2" time="0.0469" micro_passes="1" max_branch_merge="36" merged_total="189" />
+    <code-generation-time time="0.0625" />
+    <module_usages>
+      <module_usage name="time" finding="absolute" line="7" reason="import" />
+      <module_usage name="cv2" finding="absolute" line="9" reason="import" />
+      <module_usage name="numpy" finding="absolute" line="10" reason="import" />
+      <module_usage name="shenwu.game_window" finding="absolute" line="12" reason="import" />
+      <module_usage name="shenwu.timing" finding="absolute" line="13" reason="import" />
+      <module_usage name="shenwu.utils" finding="absolute" line="14" reason="import" />
+      <module_usage name="shenwu.win_input" finding="absolute" line="15" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.tasks.bao_tu" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\tasks\bao_tu.py">
+    <optimization-time pass="1" time="0.2500" micro_passes="7" max_branch_merge="14" merged_total="1358" />
+    <optimization-time pass="2" time="0.0469" micro_passes="1" max_branch_merge="14" merged_total="192" />
+    <code-generation-time time="0.0781" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="7" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="shenwu.game_window" finding="absolute" line="9" reason="import" />
+      <module_usage name="shenwu.timing" finding="absolute" line="10" reason="import" />
+      <module_usage name="shenwu.utils" finding="absolute" line="11" reason="import" />
+      <module_usage name="shenwu.win_input" finding="absolute" line="12" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.timing" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\timing.py">
+    <optimization-time pass="1" time="0.0625" micro_passes="5" max_branch_merge="10" merged_total="230" />
+    <optimization-time pass="2" time="0.0156" micro_passes="1" max_branch_merge="9" merged_total="42" />
+    <code-generation-time time="0.0312" />
+    <module_usages>
+      <module_usage name="math" finding="absolute" line="11" reason="import" />
+      <module_usage name="random" finding="excluded" line="12" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="threading" finding="excluded" line="13" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="time" finding="absolute" line="14" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.utils" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\utils.py">
+    <optimization-time pass="1" time="0.3281" micro_passes="4" max_branch_merge="21" merged_total="361" />
+    <optimization-time pass="2" time="0.0156" micro_passes="1" max_branch_merge="19" merged_total="92" />
+    <code-generation-time time="0.0312" />
+    <module_usages>
+      <module_usage name="time" finding="absolute" line="14" reason="import" />
+      <module_usage name="cv2" finding="absolute" line="16" reason="import" />
+      <module_usage name="numpy" finding="absolute" line="17" reason="import" />
+      <module_usage name="PIL" finding="absolute" line="18" reason="import" />
+      <module_usage name="PIL.ImageGrab" finding="relative" line="18" reason="import fromlist" />
+      <module_usage name="shenwu.game_window" finding="absolute" line="20" reason="import" />
+      <module_usage name="shenwu.timing" finding="absolute" line="21" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.vision" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\vision.py">
+    <optimization-time pass="1" time="0.3281" micro_passes="7" max_branch_merge="49" merged_total="2159" />
+    <optimization-time pass="2" time="0.0469" micro_passes="1" max_branch_merge="43" merged_total="306" />
+    <code-generation-time time="0.0938" />
+    <module_usages>
+      <module_usage name="cv2" finding="absolute" line="7" reason="import" />
+      <module_usage name="numpy" finding="absolute" line="8" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.win_input" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\win_input.py">
+    <optimization-time pass="1" time="0.1562" micro_passes="5" max_branch_merge="10" merged_total="1171" />
+    <optimization-time pass="2" time="0.0312" micro_passes="1" max_branch_merge="10" merged_total="231" />
+    <code-generation-time time="0.0781" />
+    <module_usages>
+      <module_usage name="time" finding="absolute" line="13" reason="import" />
+      <module_usage name="win32api" finding="excluded" line="15" reason="import" exclusion_reason="Extension modules cannot be inspected." />
+      <module_usage name="win32con" finding="absolute" line="16" reason="import" />
+      <module_usage name="win32gui" finding="excluded" line="17" reason="import" exclusion_reason="Extension modules cannot be inspected." />
+      <module_usage name="shenwu.game_window" finding="absolute" line="19" reason="import" />
+      <module_usage name="shenwu.timing" finding="absolute" line="20" reason="import" />
+    </module_usages>
+  </module>
+  <module name="shenwu.windows_utils" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\windows_utils.py">
+    <optimization-time pass="1" time="0.3281" micro_passes="7" max_branch_merge="32" merged_total="1872" />
+    <optimization-time pass="2" time="0.0469" micro_passes="1" max_branch_merge="31" merged_total="262" />
+    <code-generation-time time="0.0781" />
+    <module_usages>
+      <module_usage name="ctypes" finding="excluded" line="1" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ctypes.wintypes" finding="absolute" line="2" reason="import" />
+      <module_usage name="time" finding="absolute" line="3" reason="import" />
+      <module_usage name="win32gui" finding="excluded" line="4" reason="import" exclusion_reason="Extension modules cannot be inspected." />
+      <module_usage name="win32con" finding="absolute" line="5" reason="import" />
+      <module_usage name="win32api" finding="excluded" line="6" reason="import" exclusion_reason="Extension modules cannot be inspected." />
+      <module_usage name="win32ui" finding="excluded" line="7" reason="import" exclusion_reason="Extension modules cannot be inspected." />
+      <module_usage name="colorsys" finding="excluded" line="54" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="shenwu.yolo_detector" kind="CompiledPythonModule" usage="import" reason="Module None instructed by user to follow to." source_path="${cwd}\shenwu\yolo_detector.py">
+    <optimization-time pass="1" time="0.1875" micro_passes="7" max_branch_merge="16" merged_total="1186" />
+    <optimization-time pass="2" time="0.0156" micro_passes="1" max_branch_merge="16" merged_total="167" />
+    <code-generation-time time="0.0781" />
+    <module_usages>
+      <module_usage name="__future__" finding="excluded" line="16" reason="import" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="cv2" finding="absolute" line="18" reason="import" />
+      <module_usage name="numpy" finding="absolute" line="19" reason="import" />
+      <module_usage name="onnxruntime" finding="not-found" line="20" reason="import" />
+    </module_usages>
+  </module>
+  <performance>
+    <memory_usage name="after_launch" value="56512512" />
+    <memory_usage name="optimization/1/__main__" value="78680064" />
+    <memory_usage name="optimization/1/shenwu.gui" value="81530880" />
+    <memory_usage name="optimization/1/shenwu.gui.main_window" value="83873792" />
+    <memory_usage name="optimization/1/shenwu.gui.app_icon" value="86007808" />
+    <memory_usage name="optimization/1/shenwu.windows_utils" value="86007808" />
+    <memory_usage name="optimization/1/shenwu.timing" value="86007808" />
+    <memory_usage name="optimization/1/shenwu.gui.workers" value="86007808" />
+    <memory_usage name="optimization/1/shenwu.gui.theme" value="86007808" />
+    <memory_usage name="optimization/1/shenwu.gui.tasks" value="86007808" />
+    <memory_usage name="optimization/1/shenwu.gui.settings" value="86073344" />
+    <memory_usage name="optimization/1/shenwu.gui.license" value="86073344" />
+    <memory_usage name="optimization/1/shenwu.utils" value="86839296" />
+    <memory_usage name="optimization/1/shenwu.game_window" value="609525760" />
+    <memory_usage name="optimization/1/shenwu.controller_cv" value="609812480" />
+    <memory_usage name="optimization/1/shenwu.yolo_detector" value="619044864" />
+    <memory_usage name="optimization/1/shenwu.win_input" value="619044864" />
+    <memory_usage name="optimization/1/shenwu.vision" value="619044864" />
+    <memory_usage name="optimization/1/shenwu.tasks.bao_tu" value="620527616" />
+    <memory_usage name="optimization/1/shenwu.tasks.bao_ta" value="621072384" />
+    <memory_usage name="optimization/1/shenwu.tasks" value="621522944" />
+    <memory_usage name="optimization/1/shenwu.resource" value="621522944" />
+    <memory_usage name="optimization/1/shenwu.config" value="621522944" />
+    <memory_usage name="optimization/1/shenwu.capture" value="621600768" />
+    <memory_usage name="optimization/1/shenwu" value="621756416" />
+    <memory_usage name="optimization/2/__main__" value="621756416" />
+    <memory_usage name="optimization/2/shenwu.gui" value="621756416" />
+    <memory_usage name="optimization/2/shenwu.gui.main_window" value="621756416" />
+    <memory_usage name="optimization/2/shenwu.gui.app_icon" value="623738880" />
+    <memory_usage name="optimization/2/shenwu.windows_utils" value="623738880" />
+    <memory_usage name="optimization/2/shenwu.timing" value="623738880" />
+    <memory_usage name="optimization/2/shenwu.gui.workers" value="623738880" />
+    <memory_usage name="optimization/2/shenwu.gui.theme" value="623738880" />
+    <memory_usage name="optimization/2/shenwu.gui.tasks" value="623738880" />
+    <memory_usage name="optimization/2/shenwu.gui.settings" value="623738880" />
+    <memory_usage name="optimization/2/shenwu.gui.license" value="623738880" />
+    <memory_usage name="optimization/2/shenwu.utils" value="623738880" />
+    <memory_usage name="optimization/2/shenwu.game_window" value="623738880" />
+    <memory_usage name="optimization/2/shenwu.controller_cv" value="623738880" />
+    <memory_usage name="optimization/2/shenwu.yolo_detector" value="624730112" />
+    <memory_usage name="optimization/2/shenwu.win_input" value="624730112" />
+    <memory_usage name="optimization/2/shenwu.vision" value="624730112" />
+    <memory_usage name="optimization/2/shenwu.tasks.bao_tu" value="624730112" />
+    <memory_usage name="optimization/2/shenwu.tasks.bao_ta" value="624730112" />
+    <memory_usage name="optimization/2/shenwu.tasks" value="624730112" />
+    <memory_usage name="optimization/2/shenwu.resource" value="624730112" />
+    <memory_usage name="optimization/2/shenwu.config" value="624730112" />
+    <memory_usage name="optimization/2/shenwu.capture" value="624730112" />
+    <memory_usage name="optimization/2/shenwu" value="624730112" />
+    <memory_usage name="before_c_code_generation" value="624730112" />
+    <memory_usage name="before_running_scons" value="637939712" />
+  </performance>
+  <data_composer blob_size="130194" total="3908">
+    <module_data filename="__bytecode.const" blob_name=".bytecode" blob_size="3" input_size="0" />
+    <module_data filename="__constants.const" blob_name="" blob_size="1125" input_size="2700" />
+    <module_data filename="module.__main__.const" blob_name="__main__" blob_size="1124" input_size="3249" />
+    <module_data filename="module.shenwu.capture.const" blob_name="shenwu.capture" blob_size="1875" input_size="3710" />
+    <module_data filename="module.shenwu.config.const" blob_name="shenwu.config" blob_size="2189" input_size="4382" />
+    <module_data filename="module.shenwu.const" blob_name="shenwu" blob_size="127" input_size="834" />
+    <module_data filename="module.shenwu.controller_cv.const" blob_name="shenwu.controller_cv" blob_size="31920" input_size="50167" />
+    <module_data filename="module.shenwu.game_window.const" blob_name="shenwu.game_window" blob_size="2753" input_size="5018" />
+    <module_data filename="module.shenwu.gui.app_icon.const" blob_name="shenwu.gui.app_icon" blob_size="1301" input_size="3106" />
+    <module_data filename="module.shenwu.gui.const" blob_name="shenwu.gui" blob_size="252" input_size="996" />
+    <module_data filename="module.shenwu.gui.license.const" blob_name="shenwu.gui.license" blob_size="8555" input_size="14494" />
+    <module_data filename="module.shenwu.gui.main_window.const" blob_name="shenwu.gui.main_window" blob_size="27800" input_size="50790" />
+    <module_data filename="module.shenwu.gui.settings.const" blob_name="shenwu.gui.settings" blob_size="1118" input_size="2536" />
+    <module_data filename="module.shenwu.gui.tasks.const" blob_name="shenwu.gui.tasks" blob_size="3738" input_size="6923" />
+    <module_data filename="module.shenwu.gui.theme.const" blob_name="shenwu.gui.theme" blob_size="9546" input_size="10504" />
+    <module_data filename="module.shenwu.gui.workers.const" blob_name="shenwu.gui.workers" blob_size="3643" input_size="5899" />
+    <module_data filename="module.shenwu.resource.const" blob_name="shenwu.resource" blob_size="2682" input_size="5470" />
+    <module_data filename="module.shenwu.tasks.bao_ta.const" blob_name="shenwu.tasks.bao_ta" blob_size="2852" input_size="5303" />
+    <module_data filename="module.shenwu.tasks.bao_tu.const" blob_name="shenwu.tasks.bao_tu" blob_size="4506" input_size="7431" />
+    <module_data filename="module.shenwu.tasks.const" blob_name="shenwu.tasks" blob_size="811" input_size="1584" />
+    <module_data filename="module.shenwu.timing.const" blob_name="shenwu.timing" blob_size="2180" input_size="4083" />
+    <module_data filename="module.shenwu.utils.const" blob_name="shenwu.utils" blob_size="2093" input_size="3689" />
+    <module_data filename="module.shenwu.vision.const" blob_name="shenwu.vision" blob_size="3012" input_size="5431" />
+    <module_data filename="module.shenwu.win_input.const" blob_name="shenwu.win_input" blob_size="6714" input_size="10851" />
+    <module_data filename="module.shenwu.windows_utils.const" blob_name="shenwu.windows_utils" blob_size="4616" input_size="8989" />
+    <module_data filename="module.shenwu.yolo_detector.const" blob_name="shenwu.yolo_detector" blob_size="3144" input_size="5462" />
+  </data_composer>
+  <performance-totals>
+    <optimization-time pass="1" time="6.7344" module_count="24" />
+    <optimization-time pass="2" time="0.8906" module_count="24" />
+    <optimization-time pass="all" time="7.6250" module_count="24" />
+    <code-generation-time time="2.1250" module_count="24" />
+  </performance-totals>
+  <python_binary filename="${cwd}\out\main.exe" />
+  <command_line>
+    <option value="--mingw64" />
+    <option value="--show-memory" />
+    <option value="--show-progress" />
+    <option value="--follow-import-to=shenwu" />
+    <option value="--output-dir=out" />
+    <option value="main.py" />
+  </command_line>
+  <plugins>
+    <plugin name="anti-bloat" user_enabled="no" />
+    <plugin name="gi" user_enabled="no" />
+    <plugin name="implicit-imports" user_enabled="no" />
+    <plugin name="multiprocessing" user_enabled="no" />
+    <plugin name="options-nanny" user_enabled="no" />
+    <plugin name="pkg-resources" user_enabled="no" />
+    <plugin name="transformers" user_enabled="no" />
+  </plugins>
+  <distributions />
+  <python python_exe="${sys.prefix}\python.exe" python_flavor="Anaconda Python" python_version="3.12.14" os_name="Windows" os_release="11" arch_name="x86_64" filesystem_encoding="utf-8">
+    <search_path>
+      <path value="${cwd}" />
+      <path value="${sys.prefix}\DLLs" />
+      <path value="${sys.prefix}\Lib" />
+      <path value="${sys.prefix}" />
+      <path value="${sys.prefix}\Lib\site-packages" />
+      <path value="${sys.prefix}\Lib\site-packages\win32" />
+      <path value="${sys.prefix}\Lib\site-packages\win32\lib" />
+      <path value="${sys.prefix}\Lib\site-packages\pythonwin" />
+    </search_path>
+  </python>
+  <output run_filename="${cwd}\out\main.cmd" />
+</nuitka-compilation-report>

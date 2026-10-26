@@ -10,7 +10,7 @@ Windows 桌面游戏自动化脚本，针对游戏《幻唐志》。通过 OpenC
 
 - Windows 11，Python 3.12，依赖用 uv 管理（`uv.lock`、`.venv`）
 - 必须在**游戏窗口已打开**的情况下运行：`GameController.__init__` 会枚举窗口并 `assert`，找不到窗口直接失败。`GameController` 通过 `get_controller()`（`lru_cache` 懒加载）获取，命令体内才构造，所以 `--help` 不需要先开游戏窗口
-- 命令行启动时设置了 `SetProcessDpiAwareness(2)`，坐标一律按屏幕绝对像素处理；**GUI 例外** —— 一个进程只允许设置一次 DPI 感知，`main.py` 在 `gui` 命令下既不设置 DPI 也不提前导入 `controller_cv` / `utils`，GUI 里的 `controller_cv` 导入全部延后到 `QApplication` 创建之后，由 Qt 自己设成 `PER_MONITOR_AWARE_V2`（实测 radio / roi 与命令行模式完全一致）
+- 命令行任务执行时才设置 `SetProcessDpiAwareness(2)`（`main.py` 的 `_cli_controller()`：先设 DPI 再导入 `controller_cv`），坐标一律按屏幕绝对像素处理；**模块导入阶段不碰 DPI** —— Windows 一个进程只允许设置一次，`gui` 命令和打包器入口（pystand 等）提前设置会让 Qt 创建 `QApplication` 时打印「SetProcessDpiAwarenessContext() failed: 拒绝访问」。GUI 里的 `controller_cv` 导入全部延后到 `QApplication` 创建之后，由 Qt 自己设成 `PER_MONITOR_AWARE_V2`（实测 radio / roi 与命令行模式完全一致）
 
 ## 常用命令
 

@@ -86,6 +86,26 @@ QFrame#queueBar {
     border: 1px solid #232c40;
     border-radius: 14px;
 }
+
+/* 顶部卡密验证条：输入框 + 验证按钮 + 结果状态 */
+QFrame#licenseBar {
+    background: #121826;
+    border: 1px solid #232c40;
+    border-radius: 10px;
+}
+QLabel#licenseState {
+    font-size: 12px;
+    color: #9aa4bd;
+}
+QLabel#licenseState[state="ok"] {
+    color: #3ddc97;
+}
+QLabel#licenseState[state="err"] {
+    color: #ff6b6b;
+}
+QLabel#licenseState[state="busy"] {
+    color: #ffb454;
+}
 QFrame#card {
     background: #10151f;
     border: 1px solid #1f2739;

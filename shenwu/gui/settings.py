@@ -25,6 +25,7 @@ DEFAULTS = {
     "auto_refresh": True,         # 空闲时自动刷新窗口列表
     "loop": {"times": 1, "interval": 30, "continue_on_error": False},
     "schedule": {"enabled": False, "time": "12:00"},
+    "license_key": "",             # 记住的卡密（license_admin 校验）：下次启动首次操作自动验证
 }
 
 

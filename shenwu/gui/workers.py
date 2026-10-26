@@ -63,6 +63,18 @@ def dispatch_task(controller, key: str, params: dict,
         controller.bao_tu(hwnd_index=_resolve_index(controller, hwnd),
                           stop_event=stop_event)
 
+    elif key == "check_qu_mo":
+        controller.check_qu_mo(hwnd_index=_resolve_index(controller, hwnd))
+
+    elif key == "reset_round":
+        try:
+            interval = float(params.get("interval", 3))
+        except (TypeError, ValueError):
+            raise ValueError("检查间隔必须是数字（秒）")
+        controller.run_reset_round(hwnd_index=_resolve_index(controller, hwnd),
+                                   interval=max(0.5, interval),
+                                   stop_event=stop_event)
+
     else:
         raise ValueError(f"未知任务: {key}")
 

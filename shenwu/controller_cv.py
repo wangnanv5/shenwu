@@ -6,10 +6,8 @@ from enum import Enum, auto
 
 import traceback
 import win32gui
-import win32con
 import win32process
 import cv2
-import numpy as np
 from munch import DefaultMunch
 
 from shenwu.capture import capture_client_only
@@ -19,11 +17,9 @@ from shenwu.game_window import (
 )
 from shenwu.resource import GameResource
 from shenwu.tasks.bao_ta import (  # 重导出：旧引用仍然可用
-    BaoTaTasks, bao_ta_diff_interval, bao_ta_min_area, bao_ta_max_area,
-    bao_ta_timeout, bao_ta_diff_thresh, bao_ta_mask_top, bao_ta_mask_bottom,
-    bao_ta_mask_left, bao_ta_mask_right, make_bao_ta_mask,
+    BaoTaTasks
 )
-from shenwu.tasks.bao_tu import BaoTuTasks, wa_bao_round_gap
+from shenwu.tasks.bao_tu import BaoTuTasks
 from shenwu.timing import TaskTerminated, human_delay, is_stopped, terminate_event
 from shenwu.utils import get_abs_x_y_cv_windows
 from shenwu.vision import find_all_match, find_best_match, generate_grid_mask, get_color
@@ -137,12 +133,6 @@ class GameController(BaoTaTasks, BaoTuTasks):
         self.radio = radio
         print(f"缩放比例: {radio}")
     
-    @functools.cached_property
-    def ocr(self):
-        # RapidOCR 构造时要加载 ONNX 模型，放在 __init__ 会拖慢所有命令
-        from shenwu.ocr import Ocr
-        return Ocr()
-
     @functools.cached_property
     def yolo(self):
         # 同 ocr：只有挖宝任务需要 YOLO，放 __init__ 会让所有命令都等模型加载；
@@ -612,6 +602,46 @@ class GameController(BaoTaTasks, BaoTuTasks):
         self.reset_retry_hwnds.add(hwnd)
         print("⚠️ 回合重置失败，下一场战斗重试")
         return False
+
+    def run_reset_round(self, hwnd_index=0, interval=3, stop_event=None):
+        """队员窗口：循环重置战斗回合，直到收到停止信号（GUI 队列任务用）。
+
+        与 run_auto_reset_round（ctrl+a 真实注入）不同，这里走消息级点击
+        「自动」按钮：窗口可在后台、可被遮挡，多窗口并行互不干扰。
+        不在战斗中时 _reset_round_hwnd 找不到「自动」按钮会直接返回 False，
+        只是空转、不会误点其它界面，所以可以按固定间隔一直轮询；
+        只在「进入战斗 / 战斗结束」切换时打印，避免每轮刷屏。
+
+        战斗中出现对话框（剧情/确认框）会盖住「自动」按钮，导致重置一直失败，
+        因此每轮先判定「战斗中且存在对话框」，命中就先把对话框关干净，再重置。
+        战斗外的对话框不动（可能是需要人工确认的入队/进入战斗提示）。
+        """
+        if not 0 <= hwnd_index < len(self.hwnd_list):
+            raise IndexError(
+                f"hwnd_index={hwnd_index} 超出范围，当前游戏窗口数: {len(self.hwnd_list)}")
+        interval = max(0.5, float(interval))
+        hwnd = self.hwnd_list[hwnd_index]
+        self.current_hwnd = hwnd
+        region = make_region(hwnd)
+        print(f"🎯 开始循环重置回合 hwnd={hwnd}（每 {interval:g}s 检查一次）")
+
+        in_fight = False
+        while not is_stopped(stop_event):
+            # 同一帧同时判定「在战斗」与「有对话框」，避免两次抓屏
+            frame = self.grab_frame(region, "gray")
+            if self.is_in_fight(frame) and self.is_has_talk(frame):
+                print(f"💬 hwnd={hwnd} 战斗中出现对话框，先关闭再重置回合")
+                self.close_talk(region, lead=0.2)
+
+            ok = self._reset_round_hwnd(hwnd)
+            if ok and not in_fight:
+                print(f"✅ hwnd={hwnd} 进入战斗，已重置回合")
+            elif not ok and in_fight:
+                print(f"🏁 hwnd={hwnd} 战斗结束，等待下一场")
+            in_fight = ok
+            human_delay(interval)
+
+        print(f"⏹ hwnd={hwnd} 停止循环重置回合")
 
     def open_bag(self, hwnd_index=0):
         try:

@@ -52,6 +52,7 @@ from PyQt6.QtWidgets import (
 import win32con
 import win32gui
 
+from shenwu.gui import license as license_client
 from shenwu.gui import settings
 from shenwu.gui.tasks import TASKS, TaskCard
 from shenwu.gui.theme import QSS, repolish
@@ -226,6 +227,8 @@ class MainWindow(QMainWindow):
             self._restoring = False
             self._apply_schedule_setting()
 
+        self._init_license_bar()  # 只回填卡密与状态，不自动发验证请求
+
     def _save_settings(self):
         """把当前界面状态写回 gui_settings.json"""
         if self._restoring:
@@ -285,15 +288,134 @@ class MainWindow(QMainWindow):
         self.btn_refresh.clicked.connect(self._refresh_windows)
 
         layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
         layout.addLayout(texts)
         layout.addStretch(1)
         layout.addWidget(self.pill)
         layout.addWidget(self.btn_refresh)
 
+        top = QWidget()
+        top.setLayout(layout)
+
+        root = QVBoxLayout()
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(8)
+        root.addWidget(top)
+        root.addWidget(self._build_license_bar())
+
         header = QWidget()
-        header.setLayout(layout)
+        header.setLayout(root)
         self._header = header
+
+    def _build_license_bar(self) -> QWidget:
+        """卡密输入 + 主动验证按钮 + 状态：与任务运行解耦，可随时单独验证"""
+        bar = QFrame()
+        bar.setObjectName("licenseBar")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(10, 7, 10, 7)
+        row.setSpacing(8)
+
+        tag = QLabel("卡密验证")
+        tag.setObjectName("sectionLabel")
+        row.addWidget(tag)
+
+        self.edit_license = QLineEdit()
+        self.edit_license.setPlaceholderText("SW-XXXX-XXXX-XXXX-XXXX")
+        self.edit_license.setMaxLength(24)
+        self.edit_license.setMinimumWidth(260)
+        self.edit_license.setMaximumWidth(360)
+        self.edit_license.setToolTip(f"校验地址：{license_client.LICENSE_URL}")
+        self.edit_license.returnPressed.connect(self._verify_license_clicked)
+        row.addWidget(self.edit_license)
+
+        self.btn_verify_license = QPushButton("验证卡密")
+        self.btn_verify_license.setToolTip(
+            "用输入框里的卡密立即向服务器验证；通过后本会话内无需再验证")
+        self.btn_verify_license.clicked.connect(self._verify_license_clicked)
+        row.addWidget(self.btn_verify_license)
+
+        self.lbl_license = QLabel("未验证")
+        self.lbl_license.setObjectName("licenseState")
+        self.lbl_license.setProperty("state", "idle")
+        self.lbl_license.setMinimumWidth(180)
+        self.lbl_license.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        row.addWidget(self.lbl_license, 1)
+        return bar
+
+    # ---------- 卡密主动验证（与任务执行解耦） ----------
+
+    def _init_license_bar(self):
+        """启动时只回填「记住的卡密」，不自动发请求，验证由用户主动触发"""
+        saved = str(self.settings.get("license_key") or "")
+        if saved:
+            self.edit_license.setText(saved)
+        if license_client.is_activated():
+            self._show_license_active()
+        elif saved:
+            self._set_license_state("idle", "待验证 · 已填入保存的卡密，点「验证卡密」")
+        else:
+            self._set_license_state("idle", "未验证 · 运行任务前请先验证卡密")
+
+    def _set_license_state(self, state: str, text: str, detail: str = ""):
+        """state: idle / busy / ok / err；长文案截断显示，完整内容放 tooltip"""
+        shown = text if len(text) <= 80 else text[:80] + "…"
+        self.lbl_license.setText(shown)
+        self.lbl_license.setToolTip(detail or text)
+        self.lbl_license.setProperty("state", state)
+        repolish(self.lbl_license)
+
+    def _set_license_busy(self, busy: bool):
+        self.btn_verify_license.setEnabled(not busy)
+        self.edit_license.setEnabled(not busy)
+        self.btn_verify_license.setText("验证中…" if busy else "验证卡密")
+
+    def _show_license_active(self):
+        info = license_client.session_info()
+        expires = info.get("expires_text") or "长期"
+        self.edit_license.setText(info.get("key") or "")
+        self._set_license_state("ok", f"✅ 已激活 · 有效期至 {expires}")
+
+    def _verify_license_clicked(self):
+        """点击「验证卡密」：立即请求服务端，结果直接显示在这一行"""
+        key = license_client.normalize_key(self.edit_license.text())
+        if key is None:
+            self._set_license_state(
+                "err", "❌ 卡密格式不正确（应为 SW-XXXX-XXXX-XXXX-XXXX）")
+            return
+
+        self.edit_license.setText(key)
+        self._set_license_busy(True)
+        self._set_license_state("busy", "⏳ 正在连接卡密服务器…")
+        QApplication.processEvents()  # 同步请求前先把「验证中」刷到界面
+
+        try:
+            result = license_client.verify_license(key)
+        except license_client.CertVerifyError as e:
+            message = str(e)
+            self._set_license_state(
+                "err", "❌ HTTPS 证书校验失败（改用 HTTP 或指定 CA）", message)
+            self._append_log(f"🔒 卡密验证失败：{message}\n")
+        except ConnectionError as e:
+            message = str(e)
+            self._set_license_state("err", "❌ 无法连接卡密服务器", message)
+            self._append_log(f"🔒 卡密验证失败：{message}\n")
+        except Exception as e:
+            self._set_license_state("err", "❌ 验证失败，请稍后重试", str(e))
+            self._append_log(f"🔒 卡密验证异常：{e}\n")
+        else:
+            if result.get("ok"):
+                license_client.activate_session(key, result)
+                self._remember_license(key)
+                self._show_license_active()
+                expires = license_client.session_info().get("expires_text") or "长期"
+                self._append_log(f"🔑 卡密验证成功，有效期至 {expires}\n")
+            else:
+                message = license_client.failure_message(result)
+                self._set_license_state("err", f"❌ {message}", message)
+                self._append_log(f"🔒 卡密验证失败：{message}\n")
+        finally:
+            self._set_license_busy(False)
 
     def _build_body(self):
         root = QWidget()
@@ -858,8 +980,41 @@ class MainWindow(QMainWindow):
             self.bindings[hwnd] = text
             self._save_bindings()
 
+    def _ensure_license(self) -> bool:
+        """使用功能前校验卡密：本会话已激活直接放行，否则先试记住的卡密，再弹窗。
+
+        只在「开始执行任务」的入口校验；停止 / 紧急停止永不被拦截。
+        """
+        if license_client.is_activated():
+            return True
+
+        saved = str(self.settings.get("license_key") or "")
+        if not license_client.ensure_activated(self, saved_key=saved,
+                                               on_saved=self._remember_license):
+            self._append_log("🔒 卡密未激活，操作已取消\n")
+            return False
+
+        self._show_license_active()
+        info = license_client.session_info()
+        expires = info.get("expires_text") or "长期"
+        if saved and license_client.normalize_key(saved) == info.get("key"):
+            self._append_log(f"🔑 已用记住的卡密自动激活，有效期至 {expires}\n")
+        else:
+            self._append_log(f"🔑 卡密激活成功，有效期至 {expires}\n")
+        return True
+
+    def _remember_license(self, key: str):
+        """记住卡密：规范化后写进 self.settings，随 _save_settings 一起落盘。
+
+        传空串等于清除（下次启动不再自动验证）。
+        """
+        self.settings["license_key"] = license_client.normalize_key(key) or ""
+        self._save_settings()
+
     def _run_row(self, hwnd: int):
         """运行某一行：该 hwnd 按其绑定的队列起独立线程，与其他行互不干扰"""
+        if not self._ensure_license():
+            return
         if hwnd in self._row_workers:
             return
         combo = self._row_combos.get(hwnd)
@@ -1134,6 +1289,9 @@ class MainWindow(QMainWindow):
 
     def _scheduled_start(self):
         """定时触发：为所有已绑定且队列非空的窗口各起一条线程并行执行"""
+        if not self._ensure_license():
+            self._append_log("⏸ 卡密未激活，本次定时执行已跳过\n")
+            return
         if self._is_busy():
             self._append_log("⏰ 到点但仍有窗口在运行，跳过本次\n")
             return

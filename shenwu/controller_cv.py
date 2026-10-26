@@ -395,7 +395,6 @@ class GameController(BaoTaTasks, BaoTuTasks):
     def open_calendar_and_wait(self, region):
         """识别并点击日程小图标打开日历，等待界面响应（替代 Alt+Y 组合键）"""
         self.click_ri_cheng_small(region)
-        human_delay(1)
 
     # ---------- 页面判断 ----------
 
@@ -825,7 +824,7 @@ class GameController(BaoTaTasks, BaoTuTasks):
 
                 self.click_match(match, region, delay=1)
                 human_delay(2)
-                self.reset_round(hwnd_index)
+                self.reset_round_on_fight(hwnd_index)
 
             except Exception:
                 count = self.window_fail_counts.get(hwnd, 0) + 1
@@ -941,16 +940,14 @@ class GameController(BaoTaTasks, BaoTuTasks):
                 if match_result is None:
                     # 打开日历
 
-                    self.wait_until(region, self.is_open_ri_cheng, lead=1,
-                                    action=lambda: self.open_calendar_and_wait(region))
+                    self.wait_until(region, self.is_open_ri_cheng,action=lambda: self.open_calendar_and_wait(region))
 
                     frame = self.grab_frame(region, "bgr")
                     match = self.find(frame, self.resource.xiu_ye_finish_icon)
                     if match is not None:
                         self.hwnd_status[hwnd].is_finish_xiu_ye = True
                         print(" 当日修业任务已完成")
-                        self.wait_until(region, self.is_open_ri_cheng, want=False, lead=1,
-                                        action=lambda: windows_key(hwnd, 'esc'))
+                        self.wait_until(region, self.is_open_ri_cheng, want=False, action=lambda: windows_key(hwnd, 'esc'))
                         continue
                     else:
                         # to-do
@@ -991,12 +988,11 @@ class GameController(BaoTaTasks, BaoTuTasks):
                         item_que_ren_match = self.find(frame, self.resource.item_xu_que_ren_icon)
                         if item_que_ren_match is not None:
                             self.click_match(item_que_ren_match, region, delay=0.1)
-                            human_delay(1)
+                            human_delay(0.1)
                             frame = self.grab_frame(region)
 
                         if not self.is_open_item_shop(frame):
                             print("修业任务购买物品成功")
-                            human_delay(0.1)
                             break
 
                     # 确保开始自动寻路
@@ -1063,7 +1059,7 @@ class GameController(BaoTaTasks, BaoTuTasks):
 
                     self.wait_until(region, self.is_in_fight,action=click_task_and_wait, action_first=True)
                     self.wait_until(region, self.is_has_talk, lead=1,want=False,action=lambda: self.close_talk(region))                    
-                    self.reset_round(hwnd_index)
+                    self.reset_round_on_fight(hwnd_index)
 
                     self.wait_until(region, self.is_in_fight, want=False, lead=0.1)
                     human_delay(0.2)
@@ -1084,7 +1080,7 @@ class GameController(BaoTaTasks, BaoTuTasks):
                     if self.is_in_fight(frame):
                         print("✅ 检测到战斗")
                         self.wait_until(region, self.is_has_talk, lead=1.5,want=False,action=lambda: self.close_talk(region))                    
-                        self.reset_round(hwnd_index)
+                        self.reset_round_on_fight(hwnd_index)
                         self.wait_until(region, self.is_in_fight, want=False, lead=0.1)
                         human_delay(0.5)
                         self.wait_until(region, self.is_has_talk, lead=1,want=False,action=lambda: self.close_talk(region))
@@ -1095,7 +1091,7 @@ class GameController(BaoTaTasks, BaoTuTasks):
                     self.wait_until(region, self.is_has_talk, lead=1,want=False,
                                     action=lambda: self.close_talk(region))
                     
-                    self.reset_round(hwnd_index)
+                    self.reset_round_on_fight(hwnd_index)
 
                     self.wait_until(region, self.is_in_fight, want=False, lead=2)
                     human_delay(0.2)
@@ -1141,14 +1137,12 @@ class GameController(BaoTaTasks, BaoTuTasks):
                 human_delay(0.1)
 
                 region = make_region(hwnd)
-                # frame = self.wait_until(region, self.is_open_f9,action=lambda: windows_key(hwnd, 'f9'))
                 frame = self.grab_frame(region)
                 # 判断有没有修炼任务,如果没有,就认为没开始接任务,就从日历开始寻路
                 if not self.has_xiu_lian_task(frame):
                     windows_move_to(hwnd, 100, 200)
                     # 打开日历
-                    self.wait_until(region, self.is_open_ri_cheng, lead=0.2,
-                                    action=lambda: self.open_calendar_and_wait(region))
+                    self.wait_until(region, self.is_open_ri_cheng, action=lambda: self.open_calendar_and_wait(region))
 
                     frame = self.grab_frame(region, "bgr")
                     match = self.find(frame, self.resource.xiu_lian_finish_icon)
@@ -1163,13 +1157,14 @@ class GameController(BaoTaTasks, BaoTuTasks):
                     windows_key(hwnd, 'esc')
                     human_delay(0.1)
 
+                    # 确保打开了修炼任务的对话
                     frame = self.wait_until(region, self.is_open_xiu_lian_talk, gap=0.1)
                     match = self.find(frame, self.resource.xiu_lian_talk_icon)
                     self.click_match(match, region)
-                    human_delay(0.5)
-                    windows_key(hwnd, 'esc')
 
-                human_delay(1)
+                    # 关闭对话
+                    self.wait_until(region, self.is_has_talk,lead=1, want=False,action=lambda: windows_key(hwnd, 'esc'))
+
                 frame = self.grab_frame(region)
                 match_result = self.find_xiu_lian_task(frame)
                 # 这个是修炼任务完成后,定位修炼任务的坐标,然后再点击,因为直接用xiu_lian_task_x的话,未完成和完成之后的任务栏的尺寸不一样
@@ -1186,11 +1181,10 @@ class GameController(BaoTaTasks, BaoTuTasks):
                     jiao_yi_zhong_xin_x, jiao_yi_zhong_xin_y = get_abs_x_y_cv_windows(match_result["bbox"])
 
                     windows_click(hwnd, jiao_yi_zhong_xin_x, jiao_yi_zhong_xin_y)
-                    human_delay(2)
 
                     item_buy_button_match = self.wait_shop_buy_button(
                         region, self.is_open_item_shop,
-                        self.resource.item_shop_buy_button_icon, gap=0.5)
+                        self.resource.item_shop_buy_button_icon, gap=2)
 
                     # 确保购买成功
                     while True:
@@ -1239,18 +1233,10 @@ class GameController(BaoTaTasks, BaoTuTasks):
                                         action=lambda: self.close_talk(region))                    
                     continue
 
-                frame = self.grab_frame(region, "raw")
-                color_result = get_color(frame,'blue',self.radio)
-
-                if not color_result:
-                    print("❌ 未找到蓝色图标")
-                    return
-                xiu_lian_task_x, xiu_lian_task_y = get_abs_x_y_cv_windows(color_result)
-
                 # 找人
                 if task_type == XiuLianTaskType.ZHAO_REN:
                     print("开始修练找人任务")
-                    windows_click(hwnd, xiu_lian_task_x, xiu_lian_task_y)
+                    windows_click(hwnd, xiu_lian_x, xiu_lian_y)
                     human_delay(2)
 
                     # 确保开始自动寻路
@@ -1265,13 +1251,13 @@ class GameController(BaoTaTasks, BaoTuTasks):
                 if task_type == XiuLianTaskType.FENG_DAO_REN:
                     print("开始修练疯道人任务")
                     def click_task_and_wait():
-                        windows_click(hwnd, xiu_lian_task_x, xiu_lian_task_y)
+                        windows_click(hwnd, xiu_lian_x, xiu_lian_y)
                         human_delay(2)
 
                     # 确保开始自动寻路
                     self.wait_until(region, self.is_in_fight,action=click_task_and_wait, action_first=True)
                     print("开始进入修炼战斗")
-                    self.reset_round(hwnd_index)
+                    self.reset_round_on_fight(hwnd_index)
 
                     self.wait_until(region, self.is_in_fight, want=False, lead=2)
                     print("修炼任务结束战斗")
@@ -1512,7 +1498,7 @@ class GameController(BaoTaTasks, BaoTuTasks):
                 print("❌ 点击 4 星后未进入战斗，流程终止")
                 return False
 
-            self.reset_round(hwnd_index)
+            self.reset_round_on_fight(hwnd_index)
 
             if self._wait_until_timeout(
                     region, self.is_in_fight, want=False,

@@ -89,3 +89,6 @@ bao_ta_xing_ji_tiao_jian = image_dir / "BaoTa" / "bao_ta_xing_ji_tiao_jian.png"
 bao_ta_kai_shi_tiao_zhan = image_dir / "BaoTa" / "bao_ta_kai_shi_tiao_zhan.png"
 bao_ta_tong_guan = image_dir / "BaoTa" / "bao_ta_tong_guan.png"
 bao_ta_an_niu = image_dir / "BaoTa" / "bao_ta_an_niu.png"
+
+# Yolo
+yolo_model_path = image_dir / "YOLO" / "last.onnx"

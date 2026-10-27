@@ -19,8 +19,9 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 
+from shenwu.config import yolo_model_path
 # 默认模型路径，可在构造时用 onnx_model 参数覆盖
-DEFAULT_ONNX_MODEL = r"C:\Users\27321\Desktop\last.onnx"
+DEFAULT_ONNX_MODEL = yolo_model_path
 
 
 class YoloDetector:

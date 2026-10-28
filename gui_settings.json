@@ -2,6 +2,10 @@
   "queues": {
     "日常": [
       {
+        "key": "check_qu_mo",
+        "params": {}
+      },
+      {
         "key": "xiu_ye",
         "params": {}
       },
@@ -30,7 +34,7 @@
     ]
   },
   "bindings": {
-    "三生万物": "宝图"
+    "三生万物": "日常"
   },
   "active_queue": "日常",
   "params": {

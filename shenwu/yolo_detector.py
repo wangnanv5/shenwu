@@ -19,9 +19,12 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 
-from shenwu.config import yolo_model_path
-# 默认模型路径，可在构造时用 onnx_model 参数覆盖
-DEFAULT_ONNX_MODEL = yolo_model_path
+from shenwu import config
+
+
+def default_onnx_model() -> str:
+    """默认模型路径：固定在 resource/Common/YOLO/ 下，与游戏主题无关"""
+    return str(config.yolo_model_path)
 
 
 class YoloDetector:
@@ -29,7 +32,9 @@ class YoloDetector:
 
     classes = ["icon"]
 
-    def __init__(self, onnx_model: str = DEFAULT_ONNX_MODEL, confidence_thres: float = 0.5):
+    def __init__(self, onnx_model: str | None = None, confidence_thres: float = 0.5):
+        # 不传模型路径时使用当前主题的默认模型
+        onnx_model = onnx_model or default_onnx_model()
         self.onnx_model = onnx_model
         self.confidence_thres = confidence_thres
 

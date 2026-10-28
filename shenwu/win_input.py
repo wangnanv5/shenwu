@@ -115,62 +115,6 @@ def windows_hotkey(hwnd, *keys, delay=0.1):
         _post_key(hwnd, vk, up=True)
         human_delay(0.05)
 
-
-# ---------- 键盘输入（真实注入，作用于前台窗口） ----------
-# 游戏判定组合键（如 Ctrl+A 重置回合）依赖系统键盘状态表，PostMessage
-# 不更新该状态表（修饰键按下了游戏也看不见），因此游戏热键必须真实注入；
-# hwnd 参数用于先把目标窗口带到前台，保证按键落入目标窗口。
-
-
-def _send_key(vk, up=False):
-    scan = win32api.MapVirtualKey(vk, 0)
-    flags = win32con.KEYEVENTF_KEYUP if up else 0
-    win32api.keybd_event(vk, scan, flags, 0)
-
-
-def press_key(key, delay=0.1, hwnd=None):
-    """按一下单个键（真实键盘注入）
-
-    :param key: 按键名，见 _vk_code
-    :param hwnd: 给了就先把这个窗口带到前台，保证按键落入目标窗口
-    :param delay: 注入前的等待秒数；按下与抬起之间固定间隔 0.05s
-    """
-    vk = _vk_code(key)
-    if hwnd is not None:
-        _check_hwnd(hwnd)
-        set_current_top(hwnd)
-    if delay:
-        human_delay(delay)
-    _send_key(vk)
-    human_delay(0.05)
-    _send_key(vk, up=True)
-
-
-def hotkey(*keys, delay=0.1, hwnd=None):
-    """组合键（真实键盘注入），修饰键在前、普通键在后，如 hotkey('ctrl', 'a')
-
-    游戏按系统键盘状态识别修饰键，必须真实注入；hwnd 给了就先带到前台。
-
-    :param keys: 修饰键在前、普通键在后
-    :param hwnd: 先带到前台的目标窗口
-    :param delay: 组合键前的等待秒数
-    """
-    if not keys:
-        raise ValueError("组合键至少需要一个按键")
-    vks = [_vk_code(k) for k in keys]
-    if hwnd is not None:
-        _check_hwnd(hwnd)
-        set_current_top(hwnd)
-    if delay:
-        human_delay(delay)
-    for vk in vks:
-        _send_key(vk)
-        human_delay(0.05)
-    for vk in reversed(vks):
-        _send_key(vk, up=True)
-        human_delay(0.05)
-
-
 # ---------- Windows 消息级输入（后台操作，不需要把窗口置顶） ----------
 # 通过 PostMessage 直接向目标窗口投递鼠标消息，窗口在后台也能收到；
 # 坐标一律是窗口客户区坐标（左上角为原点），与模板匹配得到的坐标同坐标系。

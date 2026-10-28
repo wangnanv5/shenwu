@@ -26,6 +26,7 @@ DEFAULTS = {
     "loop": {"times": 1, "interval": 30, "continue_on_error": False},
     "schedule": {"enabled": False, "time": "12:00"},
     "license_key": "",             # 记住的卡密（license_admin 校验）：下次启动首次操作自动验证
+    "theme": "GREEN",              # 游戏界面主题（GREEN/BLUE）：决定从 resource/哪个主题目录加载模板图标
 }
 
 

@@ -11,7 +11,9 @@ import cv2
 from munch import DefaultMunch
 
 from shenwu.capture import capture_client_only
-from shenwu.config import *
+# 资源路径跟随游戏主题（config.set_theme 切换后常量会重建），
+# 需要现取路径，所以用模块引用而不是 `from shenwu.config import *` 的导入期快照
+from shenwu import config
 from shenwu.game_window import (
     SHELL_WINDOW_CLASSES, get_physical_client_rect, make_region, parse_game_title, restore_window,
 )
@@ -24,9 +26,9 @@ from shenwu.timing import TaskTerminated, human_delay, is_stopped, terminate_eve
 from shenwu.utils import get_abs_x_y_cv_windows
 from shenwu.vision import find_all_match, find_best_match, generate_grid_mask, get_color
 from shenwu.win_input import (
-     press_key, windows_click, windows_key, windows_move_to, windows_right_click,
+      windows_click, windows_key, windows_move_to, windows_right_click,
 )
-from shenwu.yolo_detector import DEFAULT_ONNX_MODEL, YoloDetector
+from shenwu.yolo_detector import YoloDetector
 
 ROI = (0, 0, 800, 600)
 
@@ -137,10 +139,17 @@ class GameController(BaoTaTasks, BaoTuTasks):
     def yolo(self):
         # 同 ocr：只有挖宝任务需要 YOLO，放 __init__ 会让所有命令都等模型加载；
         # 模型文件缺失时返回 None，业务方法按「不可用」处理
-        if not os.path.exists(DEFAULT_ONNX_MODEL):
-            print(f"❌ 未找到 YOLO 模型 {DEFAULT_ONNX_MODEL}，YOLO 检测不可用")
+        # 模型固定在 resource/Common/YOLO/ 下，与游戏主题无关
+        model_path = str(config.yolo_model_path)
+        if not os.path.exists(model_path):
+            print(f"❌ 未找到 YOLO 模型 {model_path}，YOLO 检测不可用")
             return None
-        return YoloDetector(DEFAULT_ONNX_MODEL)
+        return YoloDetector(model_path)
+
+    def reload_resources(self):
+        """游戏主题切换后重载模板图标（YOLO 模型与主题无关，无需重载）"""
+        self.resource.reload()
+        print(f"✅ 模板图标已按主题 {config.current_theme} 重新加载")
 
     def detect_centers(self, frame):
         """YOLO 检测帧内目标，返回中心坐标 [(cx, cy), ...]（帧内像素坐标）。
@@ -845,15 +854,12 @@ class GameController(BaoTaTasks, BaoTuTasks):
         restore_window(hwnd)
 
         # 抛竿
-        press_key('f1', hwnd=hwnd)
-        human_delay(2)
-        press_key('f1', hwnd=hwnd)
-        human_delay(1)
 
         # 「有鱼」图标只加载一次，用项目统一的 cv2 模板匹配定位
-        you_yu_templ = cv2.imread(str(you_yu_path), cv2.IMREAD_GRAYSCALE)
+        # 路径现取（跟随当前游戏主题）
+        you_yu_templ = cv2.imread(str(config.you_yu_path), cv2.IMREAD_GRAYSCALE)
         if you_yu_templ is None:
-            raise RuntimeError(f"钓鱼图标加载失败: {you_yu_path}")
+            raise RuntimeError(f"钓鱼图标加载失败: {config.you_yu_path}")
 
         while True:
             if is_stopped(stop_event):

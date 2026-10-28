@@ -215,6 +215,11 @@ class MainWindow(QMainWindow):
             self.chk_auto_scroll.setChecked(bool(conf.get("auto_scroll", True)))
             self.chk_auto_refresh.setChecked(bool(conf.get("auto_refresh", True)))
 
+            # 游戏主题（GREEN/BLUE）：恢复下拉框选中项；真正应用在 finally 里做
+            theme = str(conf.get("theme") or "GREEN").upper()
+            idx = self.combo_theme.findData(theme)
+            self.combo_theme.setCurrentIndex(idx if idx >= 0 else 0)
+
             loop = conf.get("loop") or {}
             self.spin_times.setValue(int(loop.get("times", 1)))
             self.spin_interval.setValue(int(loop.get("interval", 30)))
@@ -225,6 +230,7 @@ class MainWindow(QMainWindow):
             self.time_schedule.setTime(_parse_time(str(plan.get("time", "12:00"))))
         finally:
             self._restoring = False
+            self._apply_game_theme()  # 启动即按保存的主题加载资源（先于控制器创建）
             self._apply_schedule_setting()
 
         self._init_license_bar()  # 只回填卡密与状态，不自动发验证请求
@@ -249,7 +255,36 @@ class MainWindow(QMainWindow):
             "enabled": self.chk_schedule.isChecked(),
             "time": self.time_schedule.time().toString("HH:mm"),
         }
+        conf["theme"] = self.combo_theme.currentData() or "GREEN"
         settings.save(conf)
+
+    # ---------- 游戏主题 ----------
+
+    def _on_theme_changed(self, _index: int):
+        """主题下拉框变化：切换资源主题并重载图标，然后存盘"""
+        if self._restoring:
+            return
+        self._apply_game_theme()
+        self._save_settings()
+
+    def _apply_game_theme(self):
+        """按主题下拉框当前值切换资源目录，并重载控制器已加载的模板图标"""
+        from shenwu import config
+        from shenwu.controller_cv import get_controller
+
+        theme = self.combo_theme.currentData() or "GREEN"
+        try:
+            config.set_theme(theme)
+        except ValueError:
+            return
+        # 只在控制器已创建时重载（cache_info 判断，避免为了切主题提前连游戏）；
+        # 还没创建的话，之后首次 get_controller() 会自然按当前主题加载
+        if get_controller.cache_info().currsize:
+            try:
+                get_controller().reload_resources()
+                self.statusBar().showMessage(f"游戏主题已切换为 {theme}，模板图标已重载", 5000)
+            except Exception as exc:
+                self.statusBar().showMessage(f"游戏主题已切换为 {theme}，但图标重载失败: {exc}", 5000)
 
     def _save_bindings(self):
         """把 hwnd 绑定转成 服务器名 -> 队列名 存盘（hwnd 跨重启会变）"""
@@ -287,11 +322,23 @@ class MainWindow(QMainWindow):
         self.btn_refresh = QPushButton("连接 / 刷新窗口")
         self.btn_refresh.clicked.connect(self._refresh_windows)
 
+        # 游戏主题：游戏有蓝色/绿色两套界面贴图，切换后动态重载对应主题的模板图标
+        # 先填好选项再连接信号，避免 addItem 触发一次无意义的切换
+        self.combo_theme = QComboBox()
+        self.combo_theme.addItem("绿色主题", "GREEN")
+        self.combo_theme.addItem("蓝色主题", "BLUE")
+        self.combo_theme.setToolTip(
+            "游戏内界面主题：切换后立即从 resource/<主题>/ 重载模板图标，\n"
+            "命令行任务也会使用这里选的主题"
+        )
+        self.combo_theme.currentIndexChanged.connect(self._on_theme_changed)
+
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
         layout.addLayout(texts)
         layout.addStretch(1)
+        layout.addWidget(self.combo_theme)
         layout.addWidget(self.pill)
         layout.addWidget(self.btn_refresh)
 

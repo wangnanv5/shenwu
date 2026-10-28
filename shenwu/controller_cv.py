@@ -959,13 +959,9 @@ class GameController(BaoTaTasks, BaoTuTasks):
                         # to-do
                         print("请在任务栏勾选修业任务")
                         self.hwnd_status[hwnd].is_finish_xiu_ye = True
-                        human_delay(0.2)
                         continue
 
-                frame = self.wait_until(region, self.is_open_f9,
-                                        action=lambda: windows_key(hwnd, 'f9'))
                 task_type = self.get_xiu_ye_task_type(frame)
-
                 if task_type is None:
                     print("❌ 修业任务类型错误")
                     continue
@@ -973,17 +969,16 @@ class GameController(BaoTaTasks, BaoTuTasks):
                 print(f"✅ 检测到修业任务 {task_type}")
                 # 任务点直接用客户区坐标（消息级点击不需要换算屏幕绝对坐标）
                 xiu_ye_x, xiu_ye_y = get_abs_x_y_cv_windows(match_result["bbox"])
-                human_delay(0.2)
 
                 # 物资
                 if task_type == XiuYeTaskType.WU_ZI:
                     print("开始修业物资任务")
                     windows_click(hwnd, xiu_ye_x, xiu_ye_y)
-                    human_delay(1)
 
+                    # 等待出现商店购买按钮
                     item_buy_button_match = self.wait_shop_buy_button(
                         region, self.is_open_item_shop,
-                        self.resource.item_shop_buy_button_icon, gap=0.5)
+                        self.resource.item_shop_buy_button_icon, gap=1)
 
                     while True:
                         self.click_match(item_buy_button_match, region)
